@@ -39,3 +39,5 @@ Background URLSession can continue transfers while the app is suspended or termi
 - Per-site popup and ad rules.
 - Download speed and ETA calculation.
 - More browser controls and download history tooling.
+
+CI is configured in .github/workflows/ios.yml and runs on pushes to main.
