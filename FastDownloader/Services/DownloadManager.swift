@@ -118,7 +118,7 @@ final class DownloadManager: NSObject, ObservableObject {
                 return
             }
 
-            task.cancel { data in
+            task.cancel(byProducingResumeData: { data in
                 DispatchQueue.main.async {
                     guard let data else { return }
                     let fileName = id.uuidString + ".resume"
@@ -136,7 +136,7 @@ final class DownloadManager: NSObject, ObservableObject {
                         }
                     }
                 }
-            }
+            })
         }
     }
 
@@ -400,7 +400,7 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
             update(id) {
                 $0.filename = destination.lastPathComponent
                 $0.localRelativePath = destination.lastPathComponent
-                $0.receivedBytes = max($0.receivedBytes, (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0)
+                $0.receivedBytes = max($0.receivedBytes, Int64((try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0))
                 $0.taskIdentifier = nil
                 $0.errorMessage = nil
             }
