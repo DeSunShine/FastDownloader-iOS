@@ -72,4 +72,20 @@ final class FastDownloaderTests: XCTestCase {
         XCTAssertEqual(store.tabs.count, 1)
         XCTAssertEqual(store.currentTab?.id, first.id)
     }
+
+    func testMovingTabChangesOrderWithoutChangingSelection() {
+        let store = BrowserStore()
+        let first = store.addTab(select: true)
+        let second = store.addTab(select: false)
+        let third = store.addTab(select: false)
+
+        store.moveTab(third.id, before: first.id)
+
+        XCTAssertEqual(store.tabs.map(\.id), [third.id, first.id, second.id])
+        XCTAssertEqual(store.selectedTabID, first.id)
+    }
+
+    func testAppVersionIs021() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.2.1")
+    }
 }
