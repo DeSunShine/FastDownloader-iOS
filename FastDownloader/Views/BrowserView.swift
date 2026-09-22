@@ -8,6 +8,7 @@ struct BrowserView: View {
             Group {
                 if let tab = store.currentTab {
                     ActiveBrowserTabView(tab: tab, store: store)
+                        .id(tab.id)
                 } else {
                     ProgressView()
                 }
@@ -26,6 +27,7 @@ private struct ActiveBrowserTabView: View {
     @ObservedObject var store: BrowserStore
     @State private var address = ""
     @State private var showTabs = false
+    @FocusState private var addressFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,15 +36,25 @@ private struct ActiveBrowserTabView: View {
                     .foregroundStyle(.secondary)
 
                 TextField("Search or enter address", text: $address)
+                    .focused($addressFocused)
                     .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
+                    .keyboardType(.webSearch)
                     .autocorrectionDisabled()
                     .submitLabel(.go)
                     .onSubmit {
-                        store.navigate(address, in: tab)
+                        navigateFromAddress()
                     }
 
-                if tab.isLoading {
+                if addressFocused && !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button {
+                        navigateFromAddress()
+                    } label: {
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.title3)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Go")
+                } else if tab.isLoading {
                     ProgressView()
                         .controlSize(.small)
                 }
@@ -52,6 +64,7 @@ private struct ActiveBrowserTabView: View {
             .background(.thinMaterial)
 
             BrowserContainer(tab: tab)
+                .id(tab.id)
 
             Divider()
 
@@ -61,7 +74,7 @@ private struct ActiveBrowserTabView: View {
                 } label: {
                     Image(systemName: "chevron.backward")
                 }
-                .disabled(!tab.webView.canGoBack)
+                .disabled(!tab.canGoBack)
 
                 Spacer()
 
@@ -70,7 +83,7 @@ private struct ActiveBrowserTabView: View {
                 } label: {
                     Image(systemName: "chevron.forward")
                 }
-                .disabled(!tab.webView.canGoForward)
+                .disabled(!tab.canGoForward)
 
                 Spacer()
 
@@ -83,21 +96,6 @@ private struct ActiveBrowserTabView: View {
                 } label: {
                     Image(systemName: tab.isLoading ? "xmark" : "arrow.clockwise")
                 }
-
-                Spacer()
-
-                Button {
-                    if let url = tab.webView.url {
-                        DownloadCapture.capture(
-                            request: URLRequest(url: url),
-                            from: tab.webView,
-                            preferredFilename: nil
-                        )
-                    }
-                } label: {
-                    Image(systemName: "arrow.down.circle")
-                }
-                .disabled(tab.webView.url == nil)
 
                 Spacer()
 
@@ -119,9 +117,10 @@ private struct ActiveBrowserTabView: View {
                 } label: {
                     Image(systemName: "plus")
                 }
+                .accessibilityLabel("New Tab")
             }
             .font(.title3)
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 24)
             .padding(.vertical, 10)
             .background(.bar)
         }
@@ -129,11 +128,18 @@ private struct ActiveBrowserTabView: View {
             address = tab.urlString ?? ""
         }
         .onChange(of: tab.urlString) { _, newValue in
+            guard !addressFocused else { return }
             address = newValue ?? ""
         }
         .sheet(isPresented: $showTabs) {
             TabSwitcherView(store: store, isPresented: $showTabs)
         }
+    }
+
+    private func navigateFromAddress() {
+        let value = address
+        addressFocused = false
+        store.navigate(value, in: tab)
     }
 }
 
@@ -145,23 +151,30 @@ private struct TabSwitcherView: View {
         NavigationStack {
             List {
                 ForEach(store.tabs) { tab in
-                    HStack {
-                        Button {
-                            store.select(tab.id)
-                            isPresented = false
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 6) {
+                                if store.selectedTabID == tab.id {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.tint)
+                                }
+
                                 Text(tab.title)
                                     .lineLimit(1)
                                     .foregroundStyle(.primary)
-                                Text(tab.urlString ?? "New Tab")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Text(tab.urlString ?? "New Tab")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
-                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            store.select(tab.id)
+                            isPresented = false
+                        }
 
                         Button(role: .destructive) {
                             store.close(tab.id)
@@ -169,6 +182,7 @@ private struct TabSwitcherView: View {
                             Image(systemName: "xmark.circle.fill")
                         }
                         .buttonStyle(.borderless)
+                        .accessibilityLabel("Close Tab")
                     }
                 }
             }
@@ -183,6 +197,7 @@ private struct TabSwitcherView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         _ = store.addTab(url: URL(string: "https://www.google.com"), select: true)
+                        isPresented = false
                     } label: {
                         Image(systemName: "plus")
                     }
