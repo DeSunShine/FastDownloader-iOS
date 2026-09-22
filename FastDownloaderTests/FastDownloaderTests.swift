@@ -79,13 +79,14 @@ final class FastDownloaderTests: XCTestCase {
         let second = store.addTab(select: false)
         let third = store.addTab(select: false)
 
-        store.moveTab(third.id, before: first.id)
+        store.moveTabs(fromOffsets: IndexSet(integer: 2), toOffset: 0)
 
         XCTAssertEqual(store.tabs.map(\.id), [third.id, first.id, second.id])
         XCTAssertEqual(store.selectedTabID, first.id)
     }
 
-    func testAppVersionIs021() {
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.2.1")
+    func testAppVersionIs022() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.2.2")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "4")
     }
 }
