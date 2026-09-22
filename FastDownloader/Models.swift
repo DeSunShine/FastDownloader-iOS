@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 enum DownloadState: String, Codable, CaseIterable {
     case queued
