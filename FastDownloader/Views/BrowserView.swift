@@ -1,26 +1,39 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct BrowserView: View {
     @ObservedObject var store: BrowserStore
+    @State private var showTabs = false
 
     var body: some View {
         NavigationStack {
-            Group {
-                if let tab = store.currentTab {
-                    ActiveBrowserTabView(tab: tab, store: store)
-                        .id(tab.id)
-                        .transition(.opacity.combined(with: .scale(scale: 0.995)))
-                } else {
+            ZStack {
+                if store.tabs.isEmpty {
                     ProgressView()
+                } else {
+                    ForEach(store.tabs) { tab in
+                        let isActive = store.selectedTabID == tab.id
+
+                        ActiveBrowserTabView(
+                            tab: tab,
+                            store: store,
+                            onShowTabs: { showTabs = true }
+                        )
+                        .opacity(isActive ? 1 : 0)
+                        .allowsHitTesting(isActive)
+                        .accessibilityHidden(!isActive)
+                        .zIndex(isActive ? 1 : 0)
+                    }
                 }
             }
-            .animation(.easeInOut(duration: 0.18), value: store.selectedTabID)
+            .animation(.easeInOut(duration: 0.24), value: store.selectedTabID)
             .navigationTitle("FastDownloader")
             .navigationBarTitleDisplayMode(.inline)
         }
         .onAppear {
             store.ensureInitialTab()
+        }
+        .sheet(isPresented: $showTabs) {
+            TabSwitcherView(store: store, isPresented: $showTabs)
         }
     }
 }
@@ -28,8 +41,9 @@ struct BrowserView: View {
 private struct ActiveBrowserTabView: View {
     @ObservedObject var tab: BrowserTab
     @ObservedObject var store: BrowserStore
+    let onShowTabs: () -> Void
+
     @State private var address = ""
-    @State private var showTabs = false
     @FocusState private var addressFocused: Bool
 
     var body: some View {
@@ -67,7 +81,6 @@ private struct ActiveBrowserTabView: View {
             .background(.thinMaterial)
 
             BrowserContainer(tab: tab)
-                .id(tab.id)
 
             Divider()
 
@@ -103,7 +116,7 @@ private struct ActiveBrowserTabView: View {
                 Spacer()
 
                 Button {
-                    showTabs = true
+                    onShowTabs()
                 } label: {
                     ZStack {
                         Image(systemName: "square.on.square")
@@ -116,9 +129,7 @@ private struct ActiveBrowserTabView: View {
                 Spacer()
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        _ = store.addTab(url: URL(string: "https://www.google.com"), select: true)
-                    }
+                    createAndSwitchToNewTab()
                 } label: {
                     Image(systemName: "plus")
                 }
@@ -136,9 +147,6 @@ private struct ActiveBrowserTabView: View {
             guard !addressFocused else { return }
             address = newValue ?? ""
         }
-        .sheet(isPresented: $showTabs) {
-            TabSwitcherView(store: store, isPresented: $showTabs)
-        }
     }
 
     private func navigateFromAddress() {
@@ -146,41 +154,39 @@ private struct ActiveBrowserTabView: View {
         addressFocused = false
         store.navigate(value, in: tab)
     }
+
+    private func createAndSwitchToNewTab() {
+        let newTab = store.addTab(
+            url: URL(string: "https://www.google.com"),
+            select: false
+        )
+
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.24)) {
+                store.select(newTab.id)
+            }
+        }
+    }
 }
 
 private struct TabSwitcherView: View {
     @ObservedObject var store: BrowserStore
     @Binding var isPresented: Bool
-    @State private var draggedTabID: UUID?
+    @Environment(\.editMode) private var editMode
 
     var body: some View {
         NavigationStack {
             List {
                 ForEach(store.tabs) { tab in
                     tabRow(tab)
-                        .contentShape(Rectangle())
-                        .draggable(tab.id.uuidString) {
-                            tabDragPreview(tab)
-                                .onAppear { draggedTabID = tab.id }
-                        }
-                        .dropDestination(for: String.self) { items, _ in
-                            guard
-                                let rawID = items.first,
-                                let draggedID = UUID(uuidString: rawID)
-                            else { return false }
-
-                            withAnimation(.snappy(duration: 0.22)) {
-                                store.moveTab(draggedID, before: tab.id)
-                            }
-                            draggedTabID = nil
-                            return true
-                        } isTargeted: { targeted in
-                            if !targeted && draggedTabID == tab.id {
-                                draggedTabID = nil
-                            }
-                        }
+                }
+                .onMove { source, destination in
+                    withAnimation(.snappy(duration: 0.22)) {
+                        store.moveTabs(fromOffsets: source, toOffset: destination)
+                    }
                 }
             }
+            .environment(\.editMode, .constant(.active))
             .animation(.snappy(duration: 0.22), value: store.tabs.map(\.id))
             .navigationTitle("Tabs")
             .toolbar {
@@ -192,9 +198,7 @@ private struct TabSwitcherView: View {
 
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        withAnimation(.snappy(duration: 0.22)) {
-                            _ = store.addTab(url: URL(string: "https://www.google.com"), select: true)
-                        }
+                        addTabWithoutClosingSwitcher()
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -203,15 +207,12 @@ private struct TabSwitcherView: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .interactiveDismissDisabled(false)
     }
 
     @ViewBuilder
     private func tabRow(_ tab: BrowserTab) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: "line.3.horizontal")
-                .foregroundStyle(.tertiary)
-                .font(.subheadline)
-
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     if store.selectedTabID == tab.id {
@@ -233,7 +234,7 @@ private struct TabSwitcherView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.18)) {
+                withAnimation(.easeInOut(duration: 0.24)) {
                     store.select(tab.id)
                 }
                 isPresented = false
@@ -250,24 +251,16 @@ private struct TabSwitcherView: View {
             .accessibilityLabel("Close Tab")
         }
         .padding(.vertical, 2)
-        .opacity(draggedTabID == tab.id ? 0.55 : 1)
     }
 
-    private func tabDragPreview(_ tab: BrowserTab) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "line.3.horizontal")
-            VStack(alignment: .leading, spacing: 2) {
-                Text(tab.title)
-                    .lineLimit(1)
-                    .font(.headline)
-                Text(tab.urlString ?? "New Tab")
-                    .lineLimit(1)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+    private func addTabWithoutClosingSwitcher() {
+        let newTab = store.addTab(
+            url: URL(string: "https://www.google.com"),
+            select: false
+        )
+
+        withAnimation(.snappy(duration: 0.22)) {
+            store.select(newTab.id)
         }
-        .padding(12)
-        .frame(width: 280, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
     }
 }
