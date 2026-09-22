@@ -95,7 +95,51 @@ private struct ActiveBrowserTabView: View {
             ZStack {
                 BrowserContainer(tab: tab)
 
-                if tab.isLoading {
+                if let error = tab.navigationError {
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                        .transition(.opacity)
+
+                    VStack(spacing: 14) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 34))
+                            .symbolRenderingMode(.hierarchical)
+
+                        Text(error.title)
+                            .font(.headline)
+
+                        Text(error.message)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+
+                        if let failingURL = error.failingURL {
+                            Text(failingURL)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                        }
+
+                        HStack(spacing: 12) {
+                            if tab.canGoBack {
+                                Button("Back") {
+                                    tab.navigationError = nil
+                                    tab.webView.goBack()
+                                }
+                                .buttonStyle(.bordered)
+                            }
+
+                            Button("Retry") {
+                                retryNavigation()
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                    .padding(28)
+                    .frame(maxWidth: 420)
+                    .transition(.opacity)
+                } else if tab.isLoading {
                     Rectangle()
                         .fill(.ultraThinMaterial)
                         .transition(.opacity)
@@ -158,7 +202,10 @@ private struct ActiveBrowserTabView: View {
                 Button {
                     if tab.isLoading {
                         tab.webView.stopLoading()
+                        tab.isLoading = false
+                        tab.loadProgress = 0
                     } else {
+                        tab.navigationError = nil
                         tab.webView.reload()
                     }
                 } label: {
@@ -206,6 +253,12 @@ private struct ActiveBrowserTabView: View {
               let url = URL(string: value)
         else { return nil }
         return url.host ?? value
+    }
+
+    private func retryNavigation() {
+        guard let target = tab.navigationError?.failingURL ?? tab.urlString else { return }
+        tab.navigationError = nil
+        _ = store.navigate(target, in: tab)
     }
 
     private func navigateFromAddress() {
