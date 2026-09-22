@@ -92,7 +92,47 @@ private struct ActiveBrowserTabView: View {
             .padding(.vertical, 9)
             .background(.thinMaterial)
 
-            BrowserContainer(tab: tab)
+            ZStack {
+                BrowserContainer(tab: tab)
+
+                if tab.isLoading {
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                        .transition(.opacity)
+
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .controlSize(.large)
+
+                        Text("Loading…")
+                            .font(.headline)
+
+                        if let host = loadingHost {
+                            Text(host)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(20)
+                    .transition(.opacity)
+                }
+            }
+            .overlay(alignment: .top) {
+                if tab.isLoading {
+                    GeometryReader { geometry in
+                        Rectangle()
+                            .frame(
+                                width: max(2, geometry.size.width * max(0.03, min(tab.loadProgress, 1))),
+                                height: 3
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .animation(.easeOut(duration: 0.15), value: tab.loadProgress)
+                    }
+                    .frame(height: 3)
+                }
+            }
+            .animation(.easeInOut(duration: 0.18), value: tab.isLoading)
 
             Divider()
 
@@ -159,6 +199,13 @@ private struct ActiveBrowserTabView: View {
             guard !addressFocused else { return }
             address = newValue ?? ""
         }
+    }
+
+    private var loadingHost: String? {
+        guard let value = tab.urlString,
+              let url = URL(string: value)
+        else { return nil }
+        return url.host ?? value
     }
 
     private func navigateFromAddress() {
