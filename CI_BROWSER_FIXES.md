@@ -1,0 +1,1 @@
+# Browser fixes CI validation
