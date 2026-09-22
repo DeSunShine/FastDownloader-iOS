@@ -25,6 +25,10 @@ final class BrowserStore: ObservableObject {
             selectedTabID = tab.id
         }
         if let url {
+            tab.urlString = url.absoluteString
+            tab.navigationError = nil
+            tab.loadProgress = 0.03
+            tab.isLoading = true
             tab.webView.load(URLRequest(url: url))
         }
         return tab
@@ -200,7 +204,7 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
             return
         }
 
-        if nsError.domain == WKError.errorDomain &&
+        if nsError.domain == WKErrorDomain &&
             nsError.code == WKError.Code.frameLoadInterruptedByPolicyChange.rawValue {
             tab?.isLoading = false
             tab?.loadProgress = 0
