@@ -204,8 +204,7 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
             return
         }
 
-        if nsError.domain == WKErrorDomain &&
-            nsError.code == WKError.Code.frameLoadInterruptedByPolicyChange.rawValue {
+        if nsError.domain == WKErrorDomain && nsError.code == 102 {
             tab?.isLoading = false
             tab?.loadProgress = 0
             updateNavigationState(webView)
