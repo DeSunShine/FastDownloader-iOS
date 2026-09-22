@@ -68,9 +68,13 @@ final class BrowserStore: ObservableObject {
         tabs.move(fromOffsets: source, toOffset: destination)
     }
 
-    func navigate(_ input: String, in tab: BrowserTab) {
-        guard let url = Self.resolvedURL(from: input) else { return }
+    @discardableResult
+    func navigate(_ input: String, in tab: BrowserTab) -> URL? {
+        guard let url = Self.resolvedURL(from: input) else { return nil }
+        tab.urlString = url.absoluteString
+        tab.isLoading = true
         tab.webView.load(URLRequest(url: url))
+        return url
     }
 
     static func resolvedURL(from input: String) -> URL? {
