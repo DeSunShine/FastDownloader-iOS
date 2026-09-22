@@ -14,6 +14,7 @@ final class FastDownloaderTests: XCTestCase {
             sourceURL: "https://example.com/file.bin",
             sourcePage: "https://example.com",
             filename: "file.bin",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
             state: .paused,
             receivedBytes: 1024,
             expectedBytes: 4096,
