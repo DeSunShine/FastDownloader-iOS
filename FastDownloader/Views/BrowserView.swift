@@ -62,7 +62,19 @@ private struct ActiveBrowserTabView: View {
                         navigateFromAddress()
                     }
 
-                if addressFocused && !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if !address.isEmpty {
+                    Button {
+                        address = ""
+                        addressFocused = true
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear address")
+                }
+
+                if !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Button {
                         navigateFromAddress()
                     } label: {
@@ -150,9 +162,16 @@ private struct ActiveBrowserTabView: View {
     }
 
     private func navigateFromAddress() {
-        let value = address
-        addressFocused = false
-        store.navigate(value, in: tab)
+        let value = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+
+        if let targetURL = store.navigate(value, in: tab) {
+            address = targetURL.absoluteString
+        }
+
+        DispatchQueue.main.async {
+            addressFocused = false
+        }
     }
 
     private func createAndSwitchToNewTab() {
