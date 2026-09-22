@@ -95,6 +95,8 @@ final class BrowserTab: ObservableObject, Identifiable {
     @Published var title = "New Tab"
     @Published var urlString: String?
     @Published var isLoading = false
+    @Published var canGoBack = false
+    @Published var canGoForward = false
 
     init(store: BrowserStore) {
         let configuration = WKWebViewConfiguration()
@@ -128,24 +130,34 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         tab?.isLoading = true
         tab?.urlString = webView.url?.absoluteString
+        updateNavigationState(webView)
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         tab?.urlString = webView.url?.absoluteString
+        updateNavigationState(webView)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         tab?.isLoading = false
         tab?.urlString = webView.url?.absoluteString
         tab?.title = webView.title ?? webView.url?.host ?? "Tab"
+        updateNavigationState(webView)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         tab?.isLoading = false
+        updateNavigationState(webView)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         tab?.isLoading = false
+        updateNavigationState(webView)
+    }
+
+    private func updateNavigationState(_ webView: WKWebView) {
+        tab?.canGoBack = webView.canGoBack
+        tab?.canGoForward = webView.canGoForward
     }
 
     func webView(
