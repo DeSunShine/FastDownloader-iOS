@@ -1,0 +1,62 @@
+name: iOS CI and IPA
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-test-package:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build for simulator
+        run: |
+          set -o pipefail
+          xcodebuild             -project FastDownloader.xcodeproj             -scheme FastDownloader             -configuration Debug             -sdk iphonesimulator             -destination 'generic/platform=iOS Simulator'             CODE_SIGNING_ALLOWED=NO             build | xcpretty
+
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; ids=[x["udid"] for runtime in d.values() for x in runtime if x.get("isAvailable") and x["name"].startswith("iPhone")]; print(ids[0] if ids else "")')
+          if [ -z "$DEVICE_ID" ]; then
+            echo "No available iPhone simulator found"
+            exit 1
+          fi
+          xcrun simctl boot "$DEVICE_ID" || true
+          xcodebuild             -project FastDownloader.xcodeproj             -scheme FastDownloader             -configuration Debug             -destination "platform=iOS Simulator,id=$DEVICE_ID"             CODE_SIGNING_ALLOWED=NO             test | xcpretty
+
+      - name: Build unsigned device app
+        run: |
+          set -euo pipefail
+          rm -rf build Payload FastDownloader-unsigned.ipa
+          xcodebuild             -project FastDownloader.xcodeproj             -scheme FastDownloader             -configuration Release             -sdk iphoneos             -destination 'generic/platform=iOS'             -derivedDataPath build/DerivedData             CODE_SIGNING_ALLOWED=NO             CODE_SIGNING_REQUIRED=NO             CODE_SIGN_IDENTITY=""             build
+
+          APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name 'FastDownloader.app' -print -quit)
+          test -n "$APP_PATH"
+          mkdir Payload
+          cp -R "$APP_PATH" Payload/FastDownloader.app
+          zip -qry FastDownloader-unsigned.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: FastDownloader-unsigned-IPA
+          path: FastDownloader-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14

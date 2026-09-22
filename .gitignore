@@ -1,0 +1,12 @@
+# Xcode
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.ipa
+Payload/
+
+# XcodeGen output can be regenerated in CI
+FastDownloader.xcodeproj/
