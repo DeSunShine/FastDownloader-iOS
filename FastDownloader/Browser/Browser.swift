@@ -64,26 +64,8 @@ final class BrowserStore: ObservableObject {
         }
     }
 
-    func moveTab(_ draggedID: UUID, before targetID: UUID) {
-        guard draggedID != targetID,
-              let sourceIndex = tabs.firstIndex(where: { $0.id == draggedID }),
-              let targetIndex = tabs.firstIndex(where: { $0.id == targetID })
-        else { return }
-
-        let tab = tabs.remove(at: sourceIndex)
-        let insertionIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
-        tabs.insert(tab, at: max(0, min(insertionIndex, tabs.count)))
-    }
-
-    func moveTab(_ draggedID: UUID, toEndAfter targetID: UUID) {
-        guard draggedID != targetID,
-              let sourceIndex = tabs.firstIndex(where: { $0.id == draggedID }),
-              let targetIndex = tabs.firstIndex(where: { $0.id == targetID })
-        else { return }
-
-        let tab = tabs.remove(at: sourceIndex)
-        let adjustedTarget = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
-        tabs.insert(tab, at: min(adjustedTarget + 1, tabs.count))
+    func moveTabs(fromOffsets source: IndexSet, toOffset destination: Int) {
+        tabs.move(fromOffsets: source, toOffset: destination)
     }
 
     func navigate(_ input: String, in tab: BrowserTab) {
