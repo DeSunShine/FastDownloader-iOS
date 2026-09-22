@@ -47,6 +47,13 @@ final class FastDownloaderTests: XCTestCase {
         )
     }
 
+    func testDownloadTestURLResolution() {
+        XCTAssertEqual(
+            BrowserStore.resolvedURL(from: "speed.hetzner.de/100MB.bin")?.absoluteString,
+            "https://speed.hetzner.de/100MB.bin"
+        )
+    }
+
     func testSelectingTabChangesCurrentTab() {
         let store = BrowserStore()
         let first = store.addTab(select: true)
@@ -85,8 +92,8 @@ final class FastDownloaderTests: XCTestCase {
         XCTAssertEqual(store.selectedTabID, first.id)
     }
 
-    func testAppVersionIs022() {
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.2.2")
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "4")
+    func testAppVersionIs023() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.2.3")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "5")
     }
 }
