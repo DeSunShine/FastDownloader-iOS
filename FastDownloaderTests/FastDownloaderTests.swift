@@ -46,4 +46,30 @@ final class FastDownloaderTests: XCTestCase {
             "https://example.com/test"
         )
     }
+
+    func testSelectingTabChangesCurrentTab() {
+        let store = BrowserStore()
+        let first = store.addTab(select: true)
+        let second = store.addTab(select: false)
+
+        XCTAssertEqual(store.currentTab?.id, first.id)
+
+        store.select(second.id)
+
+        XCTAssertEqual(store.selectedTabID, second.id)
+        XCTAssertEqual(store.currentTab?.id, second.id)
+    }
+
+    func testClosingSelectedTabSelectsRemainingTab() {
+        let store = BrowserStore()
+        let first = store.addTab(select: true)
+        let second = store.addTab(select: true)
+
+        XCTAssertEqual(store.currentTab?.id, second.id)
+
+        store.close(second.id)
+
+        XCTAssertEqual(store.tabs.count, 1)
+        XCTAssertEqual(store.currentTab?.id, first.id)
+    }
 }
