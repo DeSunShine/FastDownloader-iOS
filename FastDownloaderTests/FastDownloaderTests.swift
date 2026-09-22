@@ -54,6 +54,17 @@ final class FastDownloaderTests: XCTestCase {
         )
     }
 
+    func testDirectNavigationEntersLoadingStateImmediately() {
+        let store = BrowserStore()
+        let tab = store.addTab(select: true)
+
+        _ = store.navigate("https://example.invalid", in: tab)
+
+        XCTAssertTrue(tab.isLoading)
+        XCTAssertEqual(tab.urlString, "https://example.invalid")
+        XCTAssertNil(tab.navigationError)
+    }
+
     func testSelectingTabChangesCurrentTab() {
         let store = BrowserStore()
         let first = store.addTab(select: true)
@@ -92,8 +103,8 @@ final class FastDownloaderTests: XCTestCase {
         XCTAssertEqual(store.selectedTabID, first.id)
     }
 
-    func testAppVersionIs024() {
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.2.4")
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "6")
+    func testAppVersionIs025() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.2.5")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "7")
     }
 }
