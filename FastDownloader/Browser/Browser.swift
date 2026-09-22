@@ -72,7 +72,8 @@ final class BrowserStore: ObservableObject {
     func navigate(_ input: String, in tab: BrowserTab) -> URL? {
         guard let url = Self.resolvedURL(from: input) else { return nil }
         tab.urlString = url.absoluteString
-        tab.loadProgress = 0.05
+        tab.navigationError = nil
+        tab.loadProgress = 0.03
         tab.isLoading = true
         tab.webView.load(URLRequest(url: url))
         return url
@@ -96,6 +97,12 @@ final class BrowserStore: ObservableObject {
     }
 }
 
+struct BrowserNavigationError: Equatable {
+    let title: String
+    let message: String
+    let failingURL: String?
+}
+
 final class BrowserTab: ObservableObject, Identifiable {
     let id = UUID()
     let webView: WKWebView
@@ -105,6 +112,7 @@ final class BrowserTab: ObservableObject, Identifiable {
     @Published var urlString: String?
     @Published var isLoading = false
     @Published var loadProgress: Double = 0
+    @Published var navigationError: BrowserNavigationError?
     @Published var canGoBack = false
     @Published var canGoForward = false
 
@@ -147,9 +155,7 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        tab?.isLoading = true
-        tab?.loadProgress = max(tab?.loadProgress ?? 0, 0.05)
-        tab?.urlString = webView.url?.absoluteString
+        beginLoading(url: webView.url)
         updateNavigationState(webView)
     }
 
@@ -161,20 +167,84 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         tab?.isLoading = false
         tab?.loadProgress = 1
+        tab?.navigationError = nil
         tab?.urlString = webView.url?.absoluteString
         tab?.title = webView.title ?? webView.url?.host ?? "Tab"
         updateNavigationState(webView)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        tab?.isLoading = false
-        tab?.loadProgress = 0
-        updateNavigationState(webView)
+        handleNavigationFailure(error, webView: webView)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        handleNavigationFailure(error, webView: webView)
+    }
+
+    private func beginLoading(url: URL?) {
+        tab?.navigationError = nil
+        tab?.isLoading = true
+        tab?.loadProgress = 0.03
+        if let url {
+            tab?.urlString = url.absoluteString
+        }
+    }
+
+    private func handleNavigationFailure(_ error: Error, webView: WKWebView) {
+        let nsError = error as NSError
+
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            tab?.isLoading = false
+            tab?.loadProgress = 0
+            updateNavigationState(webView)
+            return
+        }
+
+        if nsError.domain == WKError.errorDomain &&
+            nsError.code == WKError.Code.frameLoadInterruptedByPolicyChange.rawValue {
+            tab?.isLoading = false
+            tab?.loadProgress = 0
+            updateNavigationState(webView)
+            return
+        }
+
         tab?.isLoading = false
+        tab?.loadProgress = 0
+        tab?.navigationError = BrowserNavigationError(
+            title: "Couldn’t Load Page",
+            message: friendlyMessage(for: nsError),
+            failingURL: tab?.urlString
+        )
         updateNavigationState(webView)
+    }
+
+    private func friendlyMessage(for error: NSError) -> String {
+        guard error.domain == NSURLErrorDomain else {
+            return error.localizedDescription
+        }
+
+        switch error.code {
+        case NSURLErrorTimedOut:
+            return "The connection timed out."
+        case NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed:
+            return "The server could not be found."
+        case NSURLErrorCannotConnectToHost:
+            return "Could not connect to the server."
+        case NSURLErrorNotConnectedToInternet:
+            return "There is no Internet connection."
+        case NSURLErrorNetworkConnectionLost:
+            return "The network connection was lost."
+        case NSURLErrorSecureConnectionFailed,
+             NSURLErrorServerCertificateUntrusted,
+             NSURLErrorServerCertificateHasBadDate,
+             NSURLErrorServerCertificateNotYetValid,
+             NSURLErrorServerCertificateHasUnknownRoot,
+             NSURLErrorClientCertificateRejected,
+             NSURLErrorClientCertificateRequired:
+            return "A secure connection to the server could not be established."
+        default:
+            return error.localizedDescription
+        }
     }
 
     private func updateNavigationState(_ webView: WKWebView) {
@@ -197,6 +267,10 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
             return
         }
 
+        if navigationAction.targetFrame?.isMainFrame == true {
+            beginLoading(url: navigationAction.request.url)
+        }
+
         decisionHandler(.allow)
     }
 
@@ -210,6 +284,22 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         let contentDisposition = http?.value(forHTTPHeaderField: "Content-Disposition")?.lowercased() ?? ""
         let isAttachment = contentDisposition.contains("attachment")
         let shouldDownload = isAttachment || !navigationResponse.canShowMIMEType
+
+        if navigationResponse.isForMainFrame,
+           let http,
+           (400...599).contains(http.statusCode),
+           !shouldDownload {
+            tab?.isLoading = false
+            tab?.loadProgress = 0
+            tab?.urlString = response.url?.absoluteString ?? tab?.urlString
+            tab?.navigationError = BrowserNavigationError(
+                title: "HTTP \(http.statusCode)",
+                message: HTTPURLResponse.localizedString(forStatusCode: http.statusCode).capitalized,
+                failingURL: response.url?.absoluteString
+            )
+            decisionHandler(.cancel)
+            return
+        }
 
         guard shouldDownload, let url = response.url else {
             decisionHandler(.allow)
