@@ -72,6 +72,7 @@ final class BrowserStore: ObservableObject {
     func navigate(_ input: String, in tab: BrowserTab) -> URL? {
         guard let url = Self.resolvedURL(from: input) else { return nil }
         tab.urlString = url.absoluteString
+        tab.loadProgress = 0.05
         tab.isLoading = true
         tab.webView.load(URLRequest(url: url))
         return url
@@ -103,8 +104,11 @@ final class BrowserTab: ObservableObject, Identifiable {
     @Published var title = "New Tab"
     @Published var urlString: String?
     @Published var isLoading = false
+    @Published var loadProgress: Double = 0
     @Published var canGoBack = false
     @Published var canGoForward = false
+
+    private var cancellables = Set<AnyCancellable>()
 
     init(store: BrowserStore) {
         let configuration = WKWebViewConfiguration()
@@ -119,6 +123,13 @@ final class BrowserTab: ObservableObject, Identifiable {
         webView.uiDelegate = delegateProxy
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = true
+
+        webView.publisher(for: \.estimatedProgress)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] progress in
+                self?.loadProgress = progress
+            }
+            .store(in: &cancellables)
     }
 }
 
@@ -137,6 +148,7 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         tab?.isLoading = true
+        tab?.loadProgress = max(tab?.loadProgress ?? 0, 0.05)
         tab?.urlString = webView.url?.absoluteString
         updateNavigationState(webView)
     }
@@ -148,6 +160,7 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         tab?.isLoading = false
+        tab?.loadProgress = 1
         tab?.urlString = webView.url?.absoluteString
         tab?.title = webView.title ?? webView.url?.host ?? "Tab"
         updateNavigationState(webView)
@@ -155,6 +168,7 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         tab?.isLoading = false
+        tab?.loadProgress = 0
         updateNavigationState(webView)
     }
 
