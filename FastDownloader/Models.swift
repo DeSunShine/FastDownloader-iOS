@@ -127,6 +127,7 @@ final class AppSettings: ObservableObject {
         static let allowConstrained = "settings.allowConstrained"
         static let verifyDownloads = "settings.verifyDownloads"
         static let openPopupsInTabs = "settings.openPopupsInTabs"
+        static let downloadNotifications = "settings.downloadNotifications"
     }
 
     @Published var allowCellular: Bool {
@@ -145,6 +146,10 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(openPopupsInTabs, forKey: Key.openPopupsInTabs) }
     }
 
+    @Published var downloadNotifications: Bool {
+        didSet { UserDefaults.standard.set(downloadNotifications, forKey: Key.downloadNotifications) }
+    }
+
     private init() {
         let defaults = UserDefaults.standard
         if defaults.object(forKey: Key.allowCellular) == nil {
@@ -159,10 +164,14 @@ final class AppSettings: ObservableObject {
         if defaults.object(forKey: Key.openPopupsInTabs) == nil {
             defaults.set(true, forKey: Key.openPopupsInTabs)
         }
+        if defaults.object(forKey: Key.downloadNotifications) == nil {
+            defaults.set(true, forKey: Key.downloadNotifications)
+        }
 
         allowCellular = defaults.bool(forKey: Key.allowCellular)
         allowConstrained = defaults.bool(forKey: Key.allowConstrained)
         verifyDownloads = defaults.bool(forKey: Key.verifyDownloads)
         openPopupsInTabs = defaults.bool(forKey: Key.openPopupsInTabs)
+        downloadNotifications = defaults.bool(forKey: Key.downloadNotifications)
     }
 }
