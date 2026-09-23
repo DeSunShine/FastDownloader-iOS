@@ -126,20 +126,29 @@ final class DownloadManager: NSObject, ObservableObject {
 
             task.cancel(byProducingResumeData: { data in
                 DispatchQueue.main.async {
-                    guard let data else { return }
+                    self.update(id) {
+                        $0.taskIdentifier = nil
+                        $0.resumeDataFile = nil
+                    }
+
+                    guard let data else {
+                        self.saveItems()
+                        return
+                    }
+
                     let fileName = id.uuidString + ".resume"
                     let url = self.resumeDirectory.appendingPathComponent(fileName)
                     do {
                         try data.write(to: url, options: .atomic)
                         self.update(id) {
                             $0.resumeDataFile = fileName
-                            $0.taskIdentifier = nil
                         }
                         self.saveItems()
                     } catch {
                         self.update(id) {
                             $0.errorMessage = "Could not save resume data: " + error.localizedDescription
                         }
+                        self.saveItems()
                     }
                 }
             })
