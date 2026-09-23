@@ -23,8 +23,17 @@ enum FilenameResolver {
     }
 }
 
+struct SHA256DigestResult {
+    let hex: String
+    let base64: String
+}
+
 enum FileHasher {
     static func sha256(of url: URL) throws -> String {
+        try sha256Digest(of: url).hex
+    }
+
+    static func sha256Digest(of url: URL) throws -> SHA256DigestResult {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
 
@@ -35,7 +44,52 @@ enum FileHasher {
             hasher.update(data: data)
         }
 
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        let digest = hasher.finalize()
+        let bytes = Data(digest)
+        return SHA256DigestResult(
+            hex: bytes.map { String(format: "%02x", $0) }.joined(),
+            base64: bytes.base64EncodedString()
+        )
+    }
+}
+
+enum HTTPDigestParser {
+    static func sha256Base64(contentDigest: String?, legacyDigest: String?) -> String? {
+        if let value = parseSHA256(contentDigest, colonWrapped: true) {
+            return value
+        }
+        return parseSHA256(legacyDigest, colonWrapped: false)
+    }
+
+    private static func parseSHA256(_ header: String?, colonWrapped: Bool) -> String? {
+        guard let header else { return nil }
+
+        for rawPart in header.split(separator: ",") {
+            let part = rawPart.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let equals = part.firstIndex(of: "=") else { continue }
+
+            let algorithm = part[..<equals]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard algorithm == "sha-256" else { continue }
+
+            var value = part[part.index(after: equals)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if colonWrapped, value.hasPrefix(":"), value.hasSuffix(":") {
+                value.removeFirst()
+                value.removeLast()
+            }
+
+            if value.hasPrefix("\""), value.hasSuffix("\""), value.count >= 2 {
+                value.removeFirst()
+                value.removeLast()
+            }
+
+            return Data(base64Encoded: value) == nil ? nil : value
+        }
+
+        return nil
     }
 }
 
