@@ -109,8 +109,13 @@ final class DownloadManager: NSObject, ObservableObject {
 
     func pause(id: UUID) {
         guard let index = index(of: id), items[index].state == .downloading else { return }
-        items[index].state = .paused
-        items[index].errorMessage = nil
+        update(id) {
+            $0.state = .paused
+            $0.errorMessage = nil
+            $0.bytesPerSecond = nil
+            $0.etaSeconds = nil
+        }
+        progressSamples[id] = nil
         saveItems()
 
         session.getAllTasks { [weak self] tasks in
@@ -296,6 +301,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     private func update(_ id: UUID, _ body: (inout DownloadItem) -> Void) {
         guard let index = index(of: id) else { return }
+        objectWillChange.send()
         body(&items[index])
     }
 
