@@ -45,6 +45,12 @@ private struct DownloadRow: View {
                     HStack(spacing: 5) {
                         Text(item.state.title)
 
+                        if item.transferMode == .turbo,
+                           let count = item.segments?.count {
+                            Text("•")
+                            Text("Turbo ×\(count)")
+                        }
+
                         if let host = sourceHost {
                             Text("•")
                             Text(host)
@@ -60,6 +66,13 @@ private struct DownloadRow: View {
             }
 
             progressSection
+
+            if let fallback = item.turboFallbackReason,
+               item.transferMode == .single {
+                Label("Turbo fallback: " + fallback, systemImage: "arrow.triangle.branch")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
 
             if let error = item.errorMessage, !error.isEmpty {
                 Label(error, systemImage: "exclamationmark.circle")
@@ -155,6 +168,15 @@ private struct DownloadRow: View {
             .font(.caption2)
             .foregroundStyle(.secondary)
 
+        case .merging:
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Merging Turbo segments…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
         case .verifying:
             HStack(spacing: 8) {
                 ProgressView()
@@ -233,7 +255,7 @@ private struct DownloadRow: View {
                     .buttonStyle(.borderless)
                 }
 
-            case .queued, .verifying:
+            case .queued, .merging, .verifying:
                 ProgressView()
                     .controlSize(.small)
             }
@@ -263,6 +285,7 @@ private struct DownloadRow: View {
         case .queued: return "clock"
         case .downloading: return "arrow.down.circle.fill"
         case .paused: return "pause.circle"
+        case .merging: return "square.stack.3d.up.fill"
         case .verifying: return "checkmark.shield"
         case .completed: return "checkmark.circle.fill"
         case .failed: return "exclamationmark.triangle.fill"
