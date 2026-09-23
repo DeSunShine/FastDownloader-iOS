@@ -149,6 +149,7 @@ final class BrowserTab: ObservableObject, Identifiable {
 final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
     weak var store: BrowserStore?
     let tabID: UUID
+    private var suppressNavigationFailureUntil: Date?
 
     init(store: BrowserStore, tabID: UUID) {
         self.store = store
@@ -188,6 +189,7 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     private func beginLoading(url: URL?) {
+        suppressNavigationFailureUntil = nil
         tab?.navigationError = nil
         tab?.isLoading = true
         tab?.loadProgress = 0.03
@@ -198,6 +200,15 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     private func handleNavigationFailure(_ error: Error, webView: WKWebView) {
         let nsError = error as NSError
+
+        if let deadline = suppressNavigationFailureUntil, deadline > Date() {
+            suppressNavigationFailureUntil = nil
+            tab?.isLoading = false
+            tab?.loadProgress = 0
+            tab?.navigationError = nil
+            updateNavigationState(webView)
+            return
+        }
 
         if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
             tab?.isLoading = false
@@ -263,6 +274,7 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
         if navigationAction.shouldPerformDownload {
+            suppressNavigationFailureUntil = Date().addingTimeInterval(2)
             tab?.isLoading = false
             tab?.loadProgress = 0
             tab?.navigationError = nil
@@ -314,6 +326,7 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
             return
         }
 
+        suppressNavigationFailureUntil = Date().addingTimeInterval(2)
         tab?.isLoading = false
         tab?.loadProgress = 0
         tab?.navigationError = nil
