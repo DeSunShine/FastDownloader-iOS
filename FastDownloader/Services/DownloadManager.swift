@@ -69,8 +69,10 @@ final class DownloadManager: NSObject, ObservableObject {
 
                 if available {
                     let now = Date()
-                    for taskID in self.taskProgress.keys {
-                        self.taskProgress[taskID]?.date = now
+                    for taskID in Array(self.taskProgress.keys) {
+                        if let progress = self.taskProgress[taskID] {
+                            self.taskProgress[taskID] = (now, progress.bytes)
+                        }
                     }
                 }
 
@@ -630,6 +632,7 @@ final class DownloadManager: NSObject, ObservableObject {
             index: segmentIndex
         )
         taskToItem[task.taskIdentifier] = itemID
+        taskProgress[task.taskIdentifier] = (Date(), segment.receivedBytes)
 
         segments[segmentPosition].taskIdentifier = task.taskIdentifier
         segments[segmentPosition].nextRetryAt = nil
@@ -968,6 +971,7 @@ final class DownloadManager: NSObject, ObservableObject {
         let task = session.downloadTask(with: request)
         task.taskDescription = TurboTaskDescription.single(itemID: itemID)
         taskToItem[task.taskIdentifier] = itemID
+        taskProgress[task.taskIdentifier] = (Date(), 0)
 
         update(itemID) {
             $0.transferMode = .single
@@ -1092,6 +1096,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
         task.taskDescription = TurboTaskDescription.single(itemID: id)
         taskToItem[task.taskIdentifier] = id
+        taskProgress[task.taskIdentifier] = (Date(), item.receivedBytes)
 
         update(id) {
             $0.transferMode = .single
@@ -1236,6 +1241,10 @@ final class DownloadManager: NSObject, ObservableObject {
                 guard let identity = TurboTaskDescription.parse(task.taskDescription) else { continue }
 
                 self.taskToItem[task.taskIdentifier] = identity.itemID
+                self.taskProgress[task.taskIdentifier] = (
+                    Date(),
+                    task.countOfBytesReceived
+                )
 
                 if let segmentIndex = identity.segmentIndex {
                     self.update(identity.itemID) { item in
@@ -2042,6 +2051,16 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
               let itemIndex = index(of: identity.itemID)
         else { return }
 
+        taskProgress[downloadTask.taskIdentifier] = (
+            Date(),
+            totalBytesWritten
+        )
+        recoveringTaskIDs.remove(downloadTask.taskIdentifier)
+        update(identity.itemID) {
+            $0.waitingForNetwork = false
+            $0.recoveringFromStall = false
+        }
+
         if let segmentIndex = identity.segmentIndex,
            items[itemIndex].transferMode == .turbo {
             var aggregate: Int64 = 0
@@ -2091,6 +2110,15 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
     ) {
         guard let identity = identity(for: downloadTask) else { return }
         progressSamples[identity.itemID] = nil
+        taskProgress[downloadTask.taskIdentifier] = (
+            Date(),
+            fileOffset
+        )
+        recoveringTaskIDs.remove(downloadTask.taskIdentifier)
+        update(identity.itemID) {
+            $0.waitingForNetwork = false
+            $0.recoveringFromStall = false
+        }
 
         if let segmentIndex = identity.segmentIndex {
             update(identity.itemID) { item in
@@ -2153,6 +2181,8 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
         guard let identity = identity(for: task) else { return }
 
         taskToItem.removeValue(forKey: task.taskIdentifier)
+        taskProgress[task.taskIdentifier] = nil
+        recoveringTaskIDs.remove(task.taskIdentifier)
 
         guard let error else {
             saveItems()
