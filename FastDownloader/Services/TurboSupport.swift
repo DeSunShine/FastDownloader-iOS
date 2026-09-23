@@ -79,6 +79,11 @@ enum TurboPolicy {
         max(1, (current + 1) / 2)
     }
 
+    static func higherConcurrencyIsWorthIt(measuredSpeed: Double, bestSpeed: Double) -> Bool {
+        guard measuredSpeed > 0, bestSpeed > 0 else { return measuredSpeed > 0 }
+        return measuredSpeed >= bestSpeed * tuningImprovementThreshold
+    }
+
     static func segmentCount(for totalBytes: Int64) -> Int {
         switch totalBytes {
         case ..<minimumTurboSize:
