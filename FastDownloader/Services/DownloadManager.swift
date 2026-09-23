@@ -364,6 +364,11 @@ final class DownloadManager: NSObject, ObservableObject {
 
         saveItems()
         launchTurboTasksIfNeeded(id: itemID)
+        scheduleTurboRamp(
+            id: itemID,
+            expectedStrike: 0,
+            after: TurboPolicy.rampDelay
+        )
     }
 
     private func startSegmentTask(
@@ -557,6 +562,51 @@ final class DownloadManager: NSObject, ObservableObject {
         saveItems()
     }
 
+    private func scheduleTurboRamp(
+        id: UUID,
+        expectedStrike: Int,
+        after delay: TimeInterval
+    ) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.2, delay)) { [weak self] in
+            guard let self,
+                  let itemIndex = self.index(of: id),
+                  self.items[itemIndex].state == .downloading,
+                  self.items[itemIndex].transferMode == .turbo,
+                  let segments = self.items[itemIndex].segments,
+                  !segments.isEmpty
+            else { return }
+
+            let currentStrike = self.items[itemIndex].turboRateLimitCount ?? 0
+            guard currentStrike == expectedStrike else { return }
+
+            if let until = self.items[itemIndex].rateLimitedUntil, until > Date() {
+                self.scheduleTurboRamp(
+                    id: id,
+                    expectedStrike: expectedStrike,
+                    after: until.timeIntervalSinceNow + TurboPolicy.rampDelay
+                )
+                return
+            }
+
+            let currentLimit = self.items[itemIndex].turboConcurrencyLimit
+                ?? TurboPolicy.initialConcurrency
+            let targetLimit = segments.count
+
+            guard currentLimit < targetLimit else { return }
+
+            self.update(id) {
+                $0.turboConcurrencyLimit = min(targetLimit, currentLimit + 1)
+            }
+            self.launchTurboTasksIfNeeded(id: id)
+
+            self.scheduleTurboRamp(
+                id: id,
+                expectedStrike: expectedStrike,
+                after: TurboPolicy.rampDelay
+            )
+        }
+    }
+
     private func scheduleTurboLaunch(id: UUID, after delay: TimeInterval) {
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0.25, delay)) { [weak self] in
             guard let self,
@@ -633,8 +683,15 @@ final class DownloadManager: NSObject, ObservableObject {
 
         progressSamples[id] = nil
         saveItems()
-        suspendTurboTasksForBackoff(id: id)
+
+        // Keep healthy in-flight segments running. We only stop launching new
+        // work until the server's cooldown expires.
         scheduleTurboLaunch(id: id, after: delay)
+        scheduleTurboRamp(
+            id: id,
+            expectedStrike: strike,
+            after: delay + (TurboPolicy.rampDelay * 2)
+        )
     }
 
     private func suspendTurboTasksForBackoff(id: UUID) {
@@ -879,6 +936,13 @@ final class DownloadManager: NSObject, ObservableObject {
         progressSamples[id] = nil
         saveItems()
         launchTurboTasksIfNeeded(id: id)
+
+        let strike = items[index(of: id) ?? itemIndex].turboRateLimitCount ?? 0
+        scheduleTurboRamp(
+            id: id,
+            expectedStrike: strike,
+            after: TurboPolicy.rampDelay
+        )
     }
 
     private func fallbackTurboToSingle(id: UUID, reason: String) {
@@ -1467,14 +1531,6 @@ final class DownloadManager: NSObject, ObservableObject {
                 item.segments = currentSegments
                 item.receivedBytes = currentSegments.reduce(0) {
                     $0 + ($1.completed ? $1.length : $1.receivedBytes)
-                }
-
-                if (item.turboRateLimitCount ?? 0) == 0 {
-                    let currentLimit = item.turboConcurrencyLimit ?? TurboPolicy.initialConcurrency
-                    item.turboConcurrencyLimit = min(
-                        currentSegments.count,
-                        currentLimit + 1
-                    )
                 }
 
                 allCompleted = currentSegments.allSatisfy(\.completed)
