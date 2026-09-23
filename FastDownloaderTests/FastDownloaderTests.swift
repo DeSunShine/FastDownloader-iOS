@@ -18,7 +18,9 @@ final class FastDownloaderTests: XCTestCase {
             state: .paused,
             receivedBytes: 1024,
             expectedBytes: 4096,
-            requestHeaders: ["Referer": "https://example.com"]
+            requestHeaders: ["Referer": "https://example.com"],
+            bytesPerSecond: 2_048,
+            etaSeconds: 12.5
         )
 
         let encoder = JSONEncoder()
@@ -103,8 +105,14 @@ final class FastDownloaderTests: XCTestCase {
         XCTAssertEqual(store.selectedTabID, first.id)
     }
 
-    func testAppVersionIs025() {
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.2.5")
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "7")
+    func testDurationFormatting() {
+        XCTAssertEqual(DurationFormatter.remaining(45), "45s left")
+        XCTAssertEqual(DurationFormatter.remaining(65), "1m 5s left")
+        XCTAssertEqual(DurationFormatter.remaining(3_660), "1h 1m left")
+    }
+
+    func testAppVersionIs030() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.3.0")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "8")
     }
 }
