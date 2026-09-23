@@ -68,6 +68,12 @@ private struct DownloadRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if let integrity = item.integrityStatus {
+                Label(integrity.title, systemImage: integrityIcon)
+                    .font(.caption)
+                    .foregroundStyle(integrity == .serverSHA256Verified ? .green : .secondary)
+            }
+
             if let hash = item.sha256 {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("SHA-256")
@@ -233,6 +239,19 @@ private struct DownloadRow: View {
             }
         }
         .font(.title2)
+    }
+
+    private var integrityIcon: String {
+        switch item.integrityStatus {
+        case .serverSHA256Verified:
+            return "checkmark.shield.fill"
+        case .sizeVerified:
+            return "checkmark.circle"
+        case .localSHA256:
+            return "number"
+        case nil:
+            return "checkmark"
+        }
     }
 
     private var sourceHost: String? {
