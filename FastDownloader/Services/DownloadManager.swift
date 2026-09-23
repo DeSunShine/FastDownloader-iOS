@@ -1352,10 +1352,29 @@ final class DownloadManager: NSObject, ObservableObject {
               let segment = segments.first(where: { $0.index == segmentIndex })
         else { return }
 
-        guard let response = task.response as? HTTPURLResponse,
-              response.statusCode == 206,
-              let range = ContentRangeParser.parse(response.value(forHTTPHeaderField: "Content-Range")),
-              range.start == segment.startByte,
+        guard let response = task.response as? HTTPURLResponse else {
+            fallbackTurboToSingle(
+                id: itemID,
+                reason: "Server returned an invalid range response"
+            )
+            return
+        }
+
+        if response.statusCode == 429 || response.statusCode == 503 {
+            handleTurboRateLimit(
+                id: itemID,
+                segmentIndex: segmentIndex,
+                response: response
+            )
+            return
+        }
+
+        guard response.statusCode == 206,
+              let range = ContentRangeParser.parse(
+                response.value(forHTTPHeaderField: "Content-Range")
+              ),
+              range.start >= segment.startByte,
+              range.start <= segment.endByte,
               range.end == segment.endByte,
               range.total == items[itemIndex].expectedBytes
         else {
@@ -1377,7 +1396,10 @@ final class DownloadManager: NSObject, ObservableObject {
         }
 
         let partDirectory = partsDirectory(for: itemID)
-        try? fileManager.createDirectory(at: partDirectory, withIntermediateDirectories: true)
+        try? fileManager.createDirectory(
+            at: partDirectory,
+            withIntermediateDirectories: true
+        )
 
         let partName = "segment-\(segmentIndex).part"
         let partURL = partDirectory.appendingPathComponent(partName)
@@ -1391,14 +1413,44 @@ final class DownloadManager: NSObject, ObservableObject {
 
             guard size == segment.length else {
                 try? fileManager.removeItem(at: partURL)
-                fallbackTurboToSingle(
-                    id: itemID,
-                    reason: "Server returned an incomplete byte range"
-                )
+
+                let retryAttempt = (segment.retryCount ?? 0) + 1
+                if retryAttempt <= TurboPolicy.maximumAutomaticRetries {
+                    let delay = TurboPolicy.networkRetryDelay(attempt: retryAttempt)
+                    let retryAt = Date().addingTimeInterval(delay)
+
+                    update(itemID) { item in
+                        guard var currentSegments = item.segments,
+                              let position = currentSegments.firstIndex(where: { $0.index == segmentIndex })
+                        else { return }
+
+                        currentSegments[position].taskIdentifier = nil
+                        currentSegments[position].receivedBytes = 0
+                        currentSegments[position].partFile = nil
+                        currentSegments[position].resumeDataFile = nil
+                        currentSegments[position].retryCount = retryAttempt
+                        currentSegments[position].nextRetryAt = retryAt
+                        item.segments = currentSegments
+                        item.receivedBytes = currentSegments.reduce(0) {
+                            $0 + ($1.completed ? $1.length : $1.receivedBytes)
+                        }
+                        item.errorMessage = nil
+                        item.state = .downloading
+                    }
+
+                    saveItems()
+                    scheduleTurboLaunch(id: itemID, after: delay)
+                } else {
+                    fallbackTurboToSingle(
+                        id: itemID,
+                        reason: "Server repeatedly returned incomplete byte ranges"
+                    )
+                }
                 return
             }
 
             var allCompleted = false
+
             update(itemID) { item in
                 guard var currentSegments = item.segments,
                       let position = currentSegments.firstIndex(where: { $0.index == segmentIndex })
@@ -1409,10 +1461,22 @@ final class DownloadManager: NSObject, ObservableObject {
                 currentSegments[position].partFile = partName
                 currentSegments[position].taskIdentifier = nil
                 currentSegments[position].resumeDataFile = nil
+                currentSegments[position].retryCount = 0
+                currentSegments[position].nextRetryAt = nil
+
                 item.segments = currentSegments
                 item.receivedBytes = currentSegments.reduce(0) {
                     $0 + ($1.completed ? $1.length : $1.receivedBytes)
                 }
+
+                if (item.turboRateLimitCount ?? 0) == 0 {
+                    let currentLimit = item.turboConcurrencyLimit ?? TurboPolicy.initialConcurrency
+                    item.turboConcurrencyLimit = min(
+                        currentSegments.count,
+                        currentLimit + 1
+                    )
+                }
+
                 allCompleted = currentSegments.allSatisfy(\.completed)
             }
 
@@ -1420,6 +1484,8 @@ final class DownloadManager: NSObject, ObservableObject {
 
             if allCompleted {
                 mergeTurboDownload(id: itemID)
+            } else {
+                launchTurboTasksIfNeeded(id: itemID)
             }
         } catch {
             fail(
