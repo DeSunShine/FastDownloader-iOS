@@ -51,3 +51,32 @@ enum ByteFormatter {
         shared.string(fromByteCount: value)
     }
 }
+
+
+enum SpeedFormatter {
+    static func string(_ bytesPerSecond: Double) -> String {
+        guard bytesPerSecond.isFinite, bytesPerSecond > 0 else { return "—" }
+        return ByteFormatter.string(Int64(bytesPerSecond)) + "/s"
+    }
+}
+
+enum DurationFormatter {
+    static func remaining(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "—" }
+
+        let total = Int(seconds.rounded())
+        if total < 60 {
+            return "\(max(1, total))s left"
+        }
+
+        let minutes = total / 60
+        let remainder = total % 60
+        if minutes < 60 {
+            return remainder == 0 ? "\(minutes)m left" : "\(minutes)m \(remainder)s left"
+        }
+
+        let hours = minutes / 60
+        let minuteRemainder = minutes % 60
+        return minuteRemainder == 0 ? "\(hours)h left" : "\(hours)h \(minuteRemainder)m left"
+    }
+}
