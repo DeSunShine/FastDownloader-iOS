@@ -2,7 +2,6 @@ import Foundation
 import Combine
 import UserNotifications
 
-@MainActor
 final class AppRouter: ObservableObject {
     static let shared = AppRouter()
 
@@ -33,12 +32,7 @@ final class DownloadNotificationManager {
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    func notifyCompleted(_ item: DownloadItem) {
-        guard AppSettings.shared.downloadNotifications else { return }
-
-        let content = UNMutableNotificationContent()
-        content.title = "Download Complete"
-
+    static func completionBody(for item: DownloadItem) -> String {
         var parts = [item.filename]
         if item.receivedBytes > 0 {
             parts.append(ByteFormatter.string(item.receivedBytes))
@@ -46,8 +40,22 @@ final class DownloadNotificationManager {
         if let integrity = item.integrityStatus {
             parts.append(integrity.title)
         }
+        return parts.joined(separator: " • ")
+    }
 
-        content.body = parts.joined(separator: " • ")
+    static func failureBody(for item: DownloadItem) -> String {
+        if let error = item.errorMessage, !error.isEmpty {
+            return item.filename + " • " + error
+        }
+        return item.filename
+    }
+
+    func notifyCompleted(_ item: DownloadItem) {
+        guard AppSettings.shared.downloadNotifications else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Download Complete"
+        content.body = Self.completionBody(for: item)
         content.sound = .default
         content.userInfo = [
             "destination": "downloads",
@@ -63,11 +71,7 @@ final class DownloadNotificationManager {
         let content = UNMutableNotificationContent()
         content.title = "Download Failed"
 
-        if let error = item.errorMessage, !error.isEmpty {
-            content.body = item.filename + " • " + error
-        } else {
-            content.body = item.filename
-        }
+        content.body = Self.failureBody(for: item)
 
         content.sound = .default
         content.userInfo = [
