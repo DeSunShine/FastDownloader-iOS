@@ -117,6 +117,7 @@ final class BrowserTab: ObservableObject, Identifiable {
     @Published var isLoading = false
     @Published var loadProgress: Double = 0
     @Published var navigationError: BrowserNavigationError?
+    @Published var lastSuccessfulURL: String?
     @Published var canGoBack = false
     @Published var canGoForward = false
 
@@ -173,6 +174,7 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         tab?.loadProgress = 1
         tab?.navigationError = nil
         tab?.urlString = webView.url?.absoluteString
+        tab?.lastSuccessfulURL = webView.url?.absoluteString
         tab?.title = webView.title ?? webView.url?.host ?? "Tab"
         updateNavigationState(webView)
     }
@@ -309,6 +311,9 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
             return
         }
 
+        tab?.isLoading = false
+        tab?.loadProgress = 0
+        tab?.navigationError = nil
         DownloadCapture.capture(
             request: URLRequest(url: url),
             from: webView,
