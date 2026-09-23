@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import Network
 
 final class DownloadManager: NSObject, ObservableObject {
     static let shared = DownloadManager()
@@ -23,6 +24,13 @@ final class DownloadManager: NSObject, ObservableObject {
 
     private var turboTuning: [UUID: TurboTuningState] = [:]
 
+    private let pathMonitor = NWPathMonitor()
+    private let pathMonitorQueue = DispatchQueue(label: "com.desunshine.fastdownloader.pathmonitor")
+    private var networkAvailable = true
+    private var taskProgress: [Int: (date: Date, bytes: Int64)] = [:]
+    private var recoveringTaskIDs: Set<Int> = []
+    private var watchdogTimer: DispatchSourceTimer?
+
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.background(withIdentifier: sessionIdentifier)
         configuration.sessionSendsLaunchEvents = true
@@ -36,7 +44,206 @@ final class DownloadManager: NSObject, ObservableObject {
         super.init()
         createDirectoriesIfNeeded()
         loadItems()
+        configureNetworkMonitor()
+        startStallWatchdog()
         reconnectBackgroundTasks()
+    }
+
+    private func configureNetworkMonitor() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async {
+                guard let self else { return }
+
+                let available = path.status == .satisfied
+                self.networkAvailable = available
+
+                for item in self.items where item.state == .downloading {
+                    self.update(item.id) {
+                        $0.waitingForNetwork = !available
+                        if !available {
+                            $0.bytesPerSecond = nil
+                            $0.etaSeconds = nil
+                        }
+                    }
+                }
+
+                if available {
+                    let now = Date()
+                    for taskID in self.taskProgress.keys {
+                        self.taskProgress[taskID]?.date = now
+                    }
+                }
+
+                self.saveItems()
+            }
+        }
+
+        pathMonitor.start(queue: pathMonitorQueue)
+    }
+
+    private func startStallWatchdog() {
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 3, repeating: 3)
+        timer.setEventHandler { [weak self] in
+            self?.checkForStalledTasks()
+        }
+        timer.resume()
+        watchdogTimer = timer
+    }
+
+    private func checkForStalledTasks() {
+        guard networkAvailable else { return }
+
+        let now = Date()
+
+        session.getAllTasks { [weak self] tasks in
+            DispatchQueue.main.async {
+                guard let self else { return }
+
+                for task in tasks {
+                    guard let downloadTask = task as? URLSessionDownloadTask,
+                          task.state == .running,
+                          let identity = TurboTaskDescription.parse(task.taskDescription),
+                          let itemIndex = self.index(of: identity.itemID),
+                          self.items[itemIndex].state == .downloading
+                    else { continue }
+
+                    if let limitedUntil = self.items[itemIndex].rateLimitedUntil,
+                       limitedUntil > now {
+                        continue
+                    }
+
+                    let last = self.taskProgress[task.taskIdentifier]?.date ?? now
+                    let silence = now.timeIntervalSince(last)
+
+                    let timeout: TimeInterval
+                    if identity.segmentIndex != nil {
+                        timeout = 10
+                    } else {
+                        timeout = 12
+                    }
+
+                    guard silence >= timeout,
+                          !self.recoveringTaskIDs.contains(task.taskIdentifier)
+                    else { continue }
+
+                    if let segmentIndex = identity.segmentIndex {
+                        self.recoverStalledTurboSegment(
+                            task: downloadTask,
+                            itemID: identity.itemID,
+                            segmentIndex: segmentIndex
+                        )
+                    } else {
+                        self.softRecoverStalledSingle(
+                            task: downloadTask,
+                            itemID: identity.itemID
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func softRecoverStalledSingle(
+        task: URLSessionDownloadTask,
+        itemID: UUID
+    ) {
+        let taskID = task.taskIdentifier
+        recoveringTaskIDs.insert(taskID)
+
+        update(itemID) {
+            $0.recoveringFromStall = true
+            $0.waitingForNetwork = false
+            $0.stallRecoveryCount = ($0.stallRecoveryCount ?? 0) + 1
+            $0.bytesPerSecond = nil
+            $0.etaSeconds = nil
+        }
+
+        taskProgress[taskID] = (Date(), task.countOfBytesReceived)
+
+        if task.state == .running {
+            task.suspend()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self, weak task] in
+            guard let self, let task else { return }
+
+            if task.state == .suspended {
+                task.resume()
+            }
+
+            self.taskProgress[task.taskIdentifier] = (
+                Date(),
+                task.countOfBytesReceived
+            )
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                guard let self else { return }
+                self.recoveringTaskIDs.remove(task.taskIdentifier)
+                self.update(itemID) {
+                    $0.recoveringFromStall = false
+                }
+                self.saveItems()
+            }
+        }
+
+        saveItems()
+    }
+
+    private func recoverStalledTurboSegment(
+        task: URLSessionDownloadTask,
+        itemID: UUID,
+        segmentIndex: Int
+    ) {
+        let taskID = task.taskIdentifier
+        recoveringTaskIDs.insert(taskID)
+
+        update(itemID) {
+            $0.recoveringFromStall = true
+            $0.waitingForNetwork = false
+            $0.stallRecoveryCount = ($0.stallRecoveryCount ?? 0) + 1
+            $0.bytesPerSecond = nil
+            $0.etaSeconds = nil
+        }
+
+        task.cancel(byProducingResumeData: { data in
+            DispatchQueue.main.async {
+                guard let itemIndex = self.index(of: itemID),
+                      var segments = self.items[itemIndex].segments,
+                      let position = segments.firstIndex(where: { $0.index == segmentIndex })
+                else {
+                    self.recoveringTaskIDs.remove(taskID)
+                    return
+                }
+
+                segments[position].taskIdentifier = nil
+                segments[position].nextRetryAt = Date().addingTimeInterval(0.5)
+
+                if let data {
+                    let fileName = itemID.uuidString + "-segment-\(segmentIndex)-stall.resume"
+                    let url = self.resumeDirectory.appendingPathComponent(fileName)
+                    if (try? data.write(to: url, options: .atomic)) != nil {
+                        segments[position].resumeDataFile = fileName
+                    }
+                } else {
+                    segments[position].resumeDataFile = nil
+                    segments[position].receivedBytes = 0
+                }
+
+                self.update(itemID) { item in
+                    item.segments = segments
+                    item.receivedBytes = segments.reduce(0) {
+                        $0 + ($1.completed ? $1.length : $1.receivedBytes)
+                    }
+                    item.recoveringFromStall = false
+                }
+
+                self.recoveringTaskIDs.remove(taskID)
+                self.taskProgress[taskID] = nil
+                self.saveItems()
+                self.scheduleTurboLaunch(id: itemID, after: 0.5)
+            }
+        })
     }
 
     private var applicationSupportDirectory: URL {
