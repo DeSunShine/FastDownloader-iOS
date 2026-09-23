@@ -127,3 +127,72 @@ enum TurboTaskDescription {
         return nil
     }
 }
+
+
+final class TurboRangeProbe: NSObject, URLSessionDataDelegate {
+    typealias Completion = (Result<HTTPURLResponse, Error>) -> Void
+
+    private var session: URLSession?
+    private var completion: Completion?
+    private var finished = false
+
+    static func start(request: URLRequest, completion: @escaping Completion) {
+        let probe = TurboRangeProbe()
+        probe.run(request: request, completion: completion)
+    }
+
+    private func run(request: URLRequest, completion: @escaping Completion) {
+        self.completion = completion
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.waitsForConnectivity = false
+        configuration.timeoutIntervalForRequest = 12
+        configuration.timeoutIntervalForResource = 15
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        queue.qualityOfService = .utility
+
+        let session = URLSession(configuration: configuration, delegate: self, delegateQueue: queue)
+        self.session = session
+
+        let task = session.dataTask(with: request)
+        task.resume()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        completionHandler(.cancel)
+
+        guard let http = response as? HTTPURLResponse else {
+            finish(.failure(URLError(.badServerResponse)))
+            return
+        }
+
+        finish(.success(http))
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        guard !finished, let error else { return }
+        finish(.failure(error))
+    }
+
+    private func finish(_ result: Result<HTTPURLResponse, Error>) {
+        guard !finished else { return }
+        finished = true
+        let completion = self.completion
+        self.completion = nil
+        session?.finishTasksAndInvalidate()
+        session = nil
+        completion?(result)
+    }
+}
