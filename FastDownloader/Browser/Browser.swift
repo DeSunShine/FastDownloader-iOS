@@ -263,6 +263,9 @@ final class BrowserWebDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
         if navigationAction.shouldPerformDownload {
+            tab?.isLoading = false
+            tab?.loadProgress = 0
+            tab?.navigationError = nil
             DownloadCapture.capture(
                 request: navigationAction.request,
                 from: webView,
