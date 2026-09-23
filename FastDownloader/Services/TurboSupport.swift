@@ -39,9 +39,9 @@ enum TurboPolicy {
         switch totalBytes {
         case ..<minimumTurboSize:
             return 1
-        case ..<(100 * 1024 * 1024):
+        case ..<(64 * 1024 * 1024):
             return 2
-        case ..<(500 * 1024 * 1024):
+        case ..<(512 * 1024 * 1024):
             return 4
         default:
             return 8
