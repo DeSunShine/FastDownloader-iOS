@@ -122,10 +122,9 @@ private struct ActiveBrowserTabView: View {
                         }
 
                         HStack(spacing: 12) {
-                            if tab.canGoBack {
+                            if tab.lastSuccessfulURL != nil || tab.canGoBack {
                                 Button("Back") {
-                                    tab.navigationError = nil
-                                    tab.webView.goBack()
+                                    goBackFromError()
                                 }
                                 .buttonStyle(.bordered)
                             }
@@ -253,6 +252,16 @@ private struct ActiveBrowserTabView: View {
               let url = URL(string: value)
         else { return nil }
         return url.host ?? value
+    }
+
+    private func goBackFromError() {
+        tab.navigationError = nil
+
+        if let previous = tab.lastSuccessfulURL {
+            _ = store.navigate(previous, in: tab)
+        } else if tab.webView.canGoBack {
+            tab.webView.goBack()
+        }
     }
 
     private func retryNavigation() {
