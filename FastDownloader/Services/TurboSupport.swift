@@ -54,7 +54,8 @@ enum RetryAfterParser {
 
 enum TurboPolicy {
     static let minimumTurboSize: Int64 = 20 * 1024 * 1024
-    static let initialConcurrency = 2
+    static let initialConcurrency = 1
+    static let rampDelay: TimeInterval = 0.8
     static let maximumAutomaticRetries = 6
 
     static func rateLimitDelay(retryAfter: String?, strike: Int, now: Date = Date()) -> TimeInterval {
@@ -63,7 +64,7 @@ enum TurboPolicy {
         }
 
         let exponent = max(0, min(strike - 1, 5))
-        return min(5 * pow(2, Double(exponent)), 120)
+        return min(2 * pow(2, Double(exponent)), 60)
     }
 
     static func networkRetryDelay(attempt: Int) -> TimeInterval {
@@ -72,7 +73,7 @@ enum TurboPolicy {
     }
 
     static func reducedConcurrency(current: Int) -> Int {
-        max(1, current / 2)
+        max(1, (current + 1) / 2)
     }
 
     static func segmentCount(for totalBytes: Int64) -> Int {
