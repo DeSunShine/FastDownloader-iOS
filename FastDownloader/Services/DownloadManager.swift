@@ -61,6 +61,8 @@ final class DownloadManager: NSObject, ObservableObject {
     ) {
         guard let url = originalRequest.url else { return }
 
+        DownloadNotificationManager.shared.requestAuthorizationIfNeeded()
+
         var request = originalRequest
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.allowsCellularAccess = AppSettings.shared.allowCellular
@@ -284,6 +286,16 @@ final class DownloadManager: NSObject, ObservableObject {
         }
     }
 
+    private func notifyCompleted(id: UUID) {
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        DownloadNotificationManager.shared.notifyCompleted(item)
+    }
+
+    private func notifyFailed(id: UUID) {
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        DownloadNotificationManager.shared.notifyFailed(item)
+    }
+
     private func captureResponseMetadata(from task: URLSessionTask, itemID: UUID) {
         guard let response = task.response as? HTTPURLResponse else { return }
 
@@ -416,6 +428,7 @@ final class DownloadManager: NSObject, ObservableObject {
                             $0.etaSeconds = nil
                         }
                         self?.saveItems()
+                        self?.notifyFailed(id: itemID)
                     }
                     return
                 }
@@ -436,6 +449,7 @@ final class DownloadManager: NSObject, ObservableObject {
                             $0.etaSeconds = nil
                         }
                         self?.saveItems()
+                        self?.notifyFailed(id: itemID)
                     }
                     return
                 }
@@ -455,6 +469,7 @@ final class DownloadManager: NSObject, ObservableObject {
                         $0.etaSeconds = nil
                     }
                     self?.saveItems()
+                    self?.notifyCompleted(id: itemID)
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -465,6 +480,7 @@ final class DownloadManager: NSObject, ObservableObject {
                         $0.errorMessage = "File saved, but SHA-256 calculation failed: " + error.localizedDescription
                     }
                     self?.saveItems()
+                    self?.notifyCompleted(id: itemID)
                 }
             }
         }
@@ -555,6 +571,7 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
                 $0.etaSeconds = nil
             }
             saveItems()
+            notifyFailed(id: id)
             return
         }
 
@@ -566,6 +583,7 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
                 $0.etaSeconds = nil
             }
             saveItems()
+            notifyFailed(id: id)
             return
         }
 
@@ -613,6 +631,11 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
                     }
                 }
                 saveItems()
+                if let itemIndex = index(of: id), items[itemIndex].state == .completed {
+                    notifyCompleted(id: id)
+                } else {
+                    notifyFailed(id: id)
+                }
             }
         } catch {
             update(id) {
@@ -623,6 +646,7 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
                 $0.etaSeconds = nil
             }
             saveItems()
+            notifyFailed(id: id)
         }
     }
 
@@ -664,6 +688,7 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
             $0.errorMessage = error.localizedDescription
         }
         saveItems()
+        notifyFailed(id: id)
     }
 
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
