@@ -30,7 +30,7 @@ struct RootView: View {
 
     private var activeDownloadCount: Int {
         downloads.items.filter {
-            $0.state == .queued || $0.state == .downloading || $0.state == .paused || $0.state == .verifying
+            $0.state == .queued || $0.state == .downloading || $0.state == .paused || $0.state == .merging || $0.state == .verifying
         }.count
     }
 }
