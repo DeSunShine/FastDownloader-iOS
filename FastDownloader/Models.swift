@@ -99,6 +99,8 @@ struct DownloadItem: Identifiable, Codable, Equatable {
     var turboConcurrencyLimit: Int?
     var turboRateLimitCount: Int?
     var rateLimitedUntil: Date?
+    var turboAutoTuning: Bool?
+    var turboBestConcurrency: Int?
 
     init(
         id: UUID = UUID(),
@@ -130,7 +132,9 @@ struct DownloadItem: Identifiable, Codable, Equatable {
         turboFallbackReason: String? = nil,
         turboConcurrencyLimit: Int? = nil,
         turboRateLimitCount: Int? = nil,
-        rateLimitedUntil: Date? = nil
+        rateLimitedUntil: Date? = nil,
+        turboAutoTuning: Bool? = nil,
+        turboBestConcurrency: Int? = nil
     ) {
         self.id = id
         self.sourceURL = sourceURL
@@ -162,6 +166,8 @@ struct DownloadItem: Identifiable, Codable, Equatable {
         self.turboConcurrencyLimit = turboConcurrencyLimit
         self.turboRateLimitCount = turboRateLimitCount
         self.rateLimitedUntil = rateLimitedUntil
+        self.turboAutoTuning = turboAutoTuning
+        self.turboBestConcurrency = turboBestConcurrency
     }
 
     var progress: Double {
