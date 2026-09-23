@@ -10,7 +10,7 @@ struct DownloadsView: View {
                     ContentUnavailableView(
                         "No Downloads",
                         systemImage: "arrow.down.circle",
-                        description: Text("Downloads captured by the browser will appear here.")
+                        description: Text("Open a downloadable file in Browser or long-press a link and choose Download Link.")
                     )
                 } else {
                     List {
@@ -30,47 +30,42 @@ private struct DownloadRow: View {
     let item: DownloadItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top, spacing: 10) {
                 Image(systemName: iconName)
                     .foregroundStyle(iconColor)
-                    .frame(width: 22)
+                    .font(.title3)
+                    .frame(width: 24, height: 28)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.filename)
                         .font(.headline)
                         .lineLimit(2)
 
-                    Text(item.state.title)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 5) {
+                        Text(item.state.title)
+
+                        if let host = sourceHost {
+                            Text("•")
+                            Text(host)
+                                .lineLimit(1)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
 
-                Spacer()
-
+                Spacer(minLength: 8)
                 actionButtons
             }
 
-            if item.state == .downloading || item.state == .paused {
-                ProgressView(value: item.progress)
-                HStack {
-                    Text(ByteFormatter.string(item.receivedBytes))
-                    if item.expectedBytes > 0 {
-                        Text("of " + ByteFormatter.string(item.expectedBytes))
-                    }
-                    Spacer()
-                    if item.expectedBytes > 0 {
-                        Text("\(Int(item.progress * 100))%")
-                    }
-                }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            }
+            progressSection
 
             if let error = item.errorMessage, !error.isEmpty {
-                Text(error)
+                Label(error, systemImage: "exclamationmark.circle")
                     .font(.caption)
                     .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let hash = item.sha256 {
@@ -78,6 +73,7 @@ private struct DownloadRow: View {
                     Text("SHA-256")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+
                     Text(hash)
                         .font(.system(.caption2, design: .monospaced))
                         .textSelection(.enabled)
@@ -85,7 +81,7 @@ private struct DownloadRow: View {
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 5)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
                 manager.delete(id: item.id)
@@ -96,8 +92,104 @@ private struct DownloadRow: View {
     }
 
     @ViewBuilder
+    private var progressSection: some View {
+        switch item.state {
+        case .downloading:
+            if item.expectedBytes > 0 {
+                ProgressView(value: item.progress)
+            } else {
+                ProgressView()
+            }
+
+            HStack(spacing: 6) {
+                Text(ByteFormatter.string(item.receivedBytes))
+
+                if item.expectedBytes > 0 {
+                    Text("of")
+                    Text(ByteFormatter.string(item.expectedBytes))
+                }
+
+                Spacer()
+
+                if item.expectedBytes > 0 {
+                    Text("\(Int(item.progress * 100))%")
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                if let speed = item.bytesPerSecond, speed > 0 {
+                    Text(SpeedFormatter.string(speed))
+                } else {
+                    Text("Measuring speed…")
+                }
+
+                if let eta = item.etaSeconds, eta >= 0 {
+                    Text("•")
+                    Text(DurationFormatter.remaining(eta))
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        case .paused:
+            if item.expectedBytes > 0 {
+                ProgressView(value: item.progress)
+            }
+
+            HStack {
+                Text(ByteFormatter.string(item.receivedBytes))
+                if item.expectedBytes > 0 {
+                    Text("of " + ByteFormatter.string(item.expectedBytes))
+                }
+                Spacer()
+                Text("Paused")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+
+        case .verifying:
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Calculating SHA-256…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+        case .completed:
+            HStack {
+                if item.receivedBytes > 0 {
+                    Text(ByteFormatter.string(item.receivedBytes))
+                }
+                Spacer()
+                Text("Saved to Files")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+
+        case .failed:
+            if item.receivedBytes > 0 {
+                Text(ByteFormatter.string(item.receivedBytes) + " received before failure")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+        case .queued:
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Waiting to start…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
     private var actionButtons: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 11) {
             switch item.state {
             case .downloading:
                 Button {
@@ -105,6 +197,7 @@ private struct DownloadRow: View {
                 } label: {
                     Image(systemName: "pause.circle.fill")
                 }
+                .accessibilityLabel("Pause")
                 .buttonStyle(.borderless)
 
             case .paused:
@@ -113,6 +206,7 @@ private struct DownloadRow: View {
                 } label: {
                     Image(systemName: "play.circle.fill")
                 }
+                .accessibilityLabel("Resume")
                 .buttonStyle(.borderless)
 
             case .failed:
@@ -121,6 +215,7 @@ private struct DownloadRow: View {
                 } label: {
                     Image(systemName: "arrow.clockwise.circle.fill")
                 }
+                .accessibilityLabel("Retry")
                 .buttonStyle(.borderless)
 
             case .completed:
@@ -128,6 +223,7 @@ private struct DownloadRow: View {
                     ShareLink(item: url) {
                         Image(systemName: "square.and.arrow.up")
                     }
+                    .accessibilityLabel("Share")
                     .buttonStyle(.borderless)
                 }
 
@@ -136,7 +232,11 @@ private struct DownloadRow: View {
                     .controlSize(.small)
             }
         }
-        .font(.title3)
+        .font(.title2)
+    }
+
+    private var sourceHost: String? {
+        URL(string: item.sourceURL)?.host
     }
 
     private var iconName: String {
