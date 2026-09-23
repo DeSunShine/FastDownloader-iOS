@@ -10,6 +10,7 @@ final class DownloadManager: NSObject, ObservableObject {
     private let sessionIdentifier = "com.desunshine.fastdownloader.background"
     private let fileManager = FileManager.default
     private var taskToItem: [Int: UUID] = [:]
+    private var progressSamples: [UUID: (date: Date, bytes: Int64, speed: Double)] = [:]
 
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.background(withIdentifier: sessionIdentifier)
@@ -146,11 +147,13 @@ final class DownloadManager: NSObject, ObservableObject {
         guard item.state == .paused || item.state == .failed else { return }
 
         var task: URLSessionDownloadTask?
+        var resumedFromPartialData = false
 
         if let resumeDataFile = item.resumeDataFile {
             let resumeURL = resumeDirectory.appendingPathComponent(resumeDataFile)
             if let data = try? Data(contentsOf: resumeURL) {
                 task = session.downloadTask(withResumeData: data)
+                resumedFromPartialData = true
                 try? fileManager.removeItem(at: resumeURL)
             }
         }
@@ -175,7 +178,13 @@ final class DownloadManager: NSObject, ObservableObject {
             $0.errorMessage = nil
             $0.resumeDataFile = nil
             $0.taskIdentifier = task.taskIdentifier
+            $0.bytesPerSecond = nil
+            $0.etaSeconds = nil
+            if !resumedFromPartialData {
+                $0.receivedBytes = 0
+            }
         }
+        progressSamples[id] = nil
         saveItems()
         task.resume()
     }
@@ -191,8 +200,11 @@ final class DownloadManager: NSObject, ObservableObject {
             $0.expectedBytes = 0
             $0.resumeDataFile = nil
             $0.errorMessage = nil
+            $0.bytesPerSecond = nil
+            $0.etaSeconds = nil
             $0.state = .paused
         }
+        progressSamples[id] = nil
         resume(id: id)
     }
 
@@ -250,6 +262,8 @@ final class DownloadManager: NSObject, ObservableObject {
                     if $0.state != .paused {
                         $0.state = .downloading
                     }
+                    $0.bytesPerSecond = nil
+                    $0.etaSeconds = nil
                 }
             }
             self.saveItems()
@@ -332,6 +346,8 @@ final class DownloadManager: NSObject, ObservableObject {
                     self?.update(itemID) {
                         $0.sha256 = hash
                         $0.state = .completed
+                        $0.bytesPerSecond = nil
+                        $0.etaSeconds = nil
                     }
                     self?.saveItems()
                 }
@@ -339,6 +355,8 @@ final class DownloadManager: NSObject, ObservableObject {
                 DispatchQueue.main.async {
                     self?.update(itemID) {
                         $0.state = .completed
+                        $0.bytesPerSecond = nil
+                        $0.etaSeconds = nil
                         $0.errorMessage = "File saved, but SHA-256 verification failed: " + error.localizedDescription
                     }
                     self?.saveItems()
@@ -357,11 +375,58 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
         totalBytesExpectedToWrite: Int64
     ) {
         guard let id = itemID(for: downloadTask) else { return }
+
+        let now = Date()
+        var smoothedSpeed: Double?
+        if let previous = progressSamples[id] {
+            let elapsed = now.timeIntervalSince(previous.date)
+            if elapsed >= 0.25 {
+                let deltaBytes = max(0, totalBytesWritten - previous.bytes)
+                let instant = Double(deltaBytes) / elapsed
+                let previousSpeed = previous.speed > 0 ? previous.speed : instant
+                let speed = previousSpeed * 0.72 + instant * 0.28
+                smoothedSpeed = speed
+                progressSamples[id] = (now, totalBytesWritten, speed)
+            }
+        } else {
+            progressSamples[id] = (now, totalBytesWritten, 0)
+        }
+
         update(id) {
             $0.receivedBytes = totalBytesWritten
             if totalBytesExpectedToWrite > 0 {
                 $0.expectedBytes = totalBytesExpectedToWrite
             }
+            if let smoothedSpeed, smoothedSpeed > 0 {
+                $0.bytesPerSecond = smoothedSpeed
+                if $0.expectedBytes > totalBytesWritten {
+                    $0.etaSeconds = Double($0.expectedBytes - totalBytesWritten) / smoothedSpeed
+                } else {
+                    $0.etaSeconds = nil
+                }
+            }
+            if let suggested = downloadTask.response?.suggestedFilename, !suggested.isEmpty {
+                $0.filename = FilenameResolver.sanitize(suggested)
+            }
+            $0.state = .downloading
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didResumeAtOffset fileOffset: Int64,
+        expectedTotalBytes: Int64
+    ) {
+        guard let id = itemID(for: downloadTask) else { return }
+        progressSamples[id] = nil
+        update(id) {
+            $0.receivedBytes = max(0, fileOffset)
+            if expectedTotalBytes > 0 {
+                $0.expectedBytes = expectedTotalBytes
+            }
+            $0.bytesPerSecond = nil
+            $0.etaSeconds = nil
             $0.state = .downloading
         }
     }
@@ -378,6 +443,8 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
                 $0.state = .failed
                 $0.errorMessage = "HTTP \(response.statusCode). The link may have expired or access may be denied."
                 $0.taskIdentifier = nil
+                $0.bytesPerSecond = nil
+                $0.etaSeconds = nil
             }
             saveItems()
             return
@@ -387,6 +454,8 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
             update(id) {
                 $0.state = .failed
                 $0.errorMessage = "The server did not provide a valid source URL."
+                $0.bytesPerSecond = nil
+                $0.etaSeconds = nil
             }
             saveItems()
             return
@@ -403,12 +472,18 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
                 $0.receivedBytes = max($0.receivedBytes, Int64((try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0))
                 $0.taskIdentifier = nil
                 $0.errorMessage = nil
+                $0.bytesPerSecond = nil
+                $0.etaSeconds = nil
             }
 
             if AppSettings.shared.verifyDownloads {
                 verifyFile(destination, itemID: id)
             } else {
-                update(id) { $0.state = .completed }
+                update(id) {
+                    $0.state = .completed
+                    $0.bytesPerSecond = nil
+                    $0.etaSeconds = nil
+                }
                 saveItems()
             }
         } catch {
@@ -416,6 +491,8 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
                 $0.state = .failed
                 $0.errorMessage = "Could not save the file: " + error.localizedDescription
                 $0.taskIdentifier = nil
+                $0.bytesPerSecond = nil
+                $0.etaSeconds = nil
             }
             saveItems()
         }
@@ -428,6 +505,7 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
     ) {
         guard let id = itemID(for: task) else { return }
         taskToItem.removeValue(forKey: task.taskIdentifier)
+        progressSamples[id] = nil
 
         guard let error else {
             saveItems()
@@ -453,6 +531,8 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
         update(id) {
             $0.state = .failed
             $0.taskIdentifier = nil
+            $0.bytesPerSecond = nil
+            $0.etaSeconds = nil
             $0.errorMessage = error.localizedDescription
         }
         saveItems()
