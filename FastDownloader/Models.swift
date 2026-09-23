@@ -38,6 +38,8 @@ struct DownloadSegment: Identifiable, Codable, Equatable {
     var partFile: String?
     var resumeDataFile: String?
     var taskIdentifier: Int?
+    var retryCount: Int?
+    var nextRetryAt: Date?
 
     var length: Int64 {
         endByte - startByte + 1
@@ -94,6 +96,9 @@ struct DownloadItem: Identifiable, Codable, Equatable {
     var transferMode: DownloadTransferMode?
     var segments: [DownloadSegment]?
     var turboFallbackReason: String?
+    var turboConcurrencyLimit: Int?
+    var turboRateLimitCount: Int?
+    var rateLimitedUntil: Date?
 
     init(
         id: UUID = UUID(),
@@ -122,7 +127,10 @@ struct DownloadItem: Identifiable, Codable, Equatable {
         integrityStatus: DownloadIntegrityStatus? = nil,
         transferMode: DownloadTransferMode? = nil,
         segments: [DownloadSegment]? = nil,
-        turboFallbackReason: String? = nil
+        turboFallbackReason: String? = nil,
+        turboConcurrencyLimit: Int? = nil,
+        turboRateLimitCount: Int? = nil,
+        rateLimitedUntil: Date? = nil
     ) {
         self.id = id
         self.sourceURL = sourceURL
@@ -151,6 +159,9 @@ struct DownloadItem: Identifiable, Codable, Equatable {
         self.transferMode = transferMode
         self.segments = segments
         self.turboFallbackReason = turboFallbackReason
+        self.turboConcurrencyLimit = turboConcurrencyLimit
+        self.turboRateLimitCount = turboRateLimitCount
+        self.rateLimitedUntil = rateLimitedUntil
     }
 
     var progress: Double {
