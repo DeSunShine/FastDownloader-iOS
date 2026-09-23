@@ -245,3 +245,12 @@ final class TurboRangeProbe: NSObject, URLSessionDataDelegate {
         completion?(result)
     }
 }
+
+
+enum StallPolicy {
+    static let watchdogInterval: TimeInterval = 3
+    static let singleTimeout: TimeInterval = 12
+    static let turboSegmentTimeout: TimeInterval = 10
+    static let softReconnectDelay: TimeInterval = 0.45
+    static let turboRestartDelay: TimeInterval = 0.5
+}
