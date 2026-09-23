@@ -35,6 +35,41 @@ final class FastDownloaderTests: XCTestCase {
         XCTAssertEqual(decoded.progress, 0.25, accuracy: 0.0001)
     }
 
+    func testHTTPContentDigestParsing() {
+        XCTAssertEqual(
+            HTTPDigestParser.sha256Base64(
+                contentDigest: "sha-256=:dW5nd3Y0OEJ6K3BCUVVEZVhhNGlJN0FEWWFPV0YzcWN0QkQvWWZJQUZhMD0=:",
+                legacyDigest: nil
+            ),
+            "dW5nd3Y0OEJ6K3BCUVVEZVhhNGlJN0FEWWFPV0YzcWN0QkQvWWZJQUZhMD0="
+        )
+
+        XCTAssertEqual(
+            HTTPDigestParser.sha256Base64(
+                contentDigest: nil,
+                legacyDigest: "sha-256=YWJjZA=="
+            ),
+            "YWJjZA=="
+        )
+    }
+
+    func testSHA256DigestProducesHexAndBase64() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try Data("abc".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let digest = try FileHasher.sha256Digest(of: url)
+        XCTAssertEqual(
+            digest.hex,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        )
+        XCTAssertEqual(
+            digest.base64,
+            "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="
+        )
+    }
+
     func testURLResolutionAddsHTTPS() {
         XCTAssertEqual(
             BrowserStore.resolvedURL(from: "example.com")?.absoluteString,
@@ -111,8 +146,8 @@ final class FastDownloaderTests: XCTestCase {
         XCTAssertEqual(DurationFormatter.remaining(3_660), "1h 1m left")
     }
 
-    func testAppVersionIs030() {
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.3.0")
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "8")
+    func testAppVersionIs031() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.3.1")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "9")
     }
 }
