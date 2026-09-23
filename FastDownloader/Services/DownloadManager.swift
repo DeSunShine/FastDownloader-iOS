@@ -411,6 +411,269 @@ final class DownloadManager: NSObject, ObservableObject {
         task.resume()
     }
 
+    private func scheduleProbeRetry(
+        itemID: UUID,
+        request: URLRequest,
+        response: HTTPURLResponse
+    ) {
+        guard let itemIndex = index(of: itemID) else { return }
+
+        let strike = (items[itemIndex].turboRateLimitCount ?? 0) + 1
+        guard strike <= TurboPolicy.maximumAutomaticRetries else {
+            fail(
+                id: itemID,
+                message: "The server is rate-limiting requests (HTTP \(response.statusCode)). Try again later.",
+                notify: true
+            )
+            return
+        }
+
+        let delay = TurboPolicy.rateLimitDelay(
+            retryAfter: response.value(forHTTPHeaderField: "Retry-After"),
+            strike: strike
+        )
+        let retryAt = Date().addingTimeInterval(delay)
+
+        update(itemID) {
+            $0.turboRateLimitCount = strike
+            $0.rateLimitedUntil = retryAt
+            $0.state = .queued
+            $0.errorMessage = nil
+            $0.bytesPerSecond = nil
+            $0.etaSeconds = nil
+        }
+        saveItems()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self,
+                  let currentIndex = self.index(of: itemID),
+                  self.items[currentIndex].state == .queued
+            else { return }
+
+            self.update(itemID) { $0.rateLimitedUntil = nil }
+            self.probeAndStartTurbo(itemID: itemID, request: request)
+        }
+    }
+
+    private func launchTurboTasksIfNeeded(id: UUID) {
+        guard let itemIndex = index(of: id),
+              items[itemIndex].transferMode == .turbo,
+              items[itemIndex].state == .downloading,
+              let segmentsSnapshot = items[itemIndex].segments,
+              let baseRequest = reconstructedRequest(from: items[itemIndex]),
+              let validator = TurboPolicy.strongValidator(
+                etag: items[itemIndex].responseETag,
+                lastModified: items[itemIndex].responseLastModified
+              )
+        else { return }
+
+        let now = Date()
+
+        if let limitedUntil = items[itemIndex].rateLimitedUntil, limitedUntil > now {
+            scheduleTurboLaunch(id: id, after: limitedUntil.timeIntervalSince(now))
+            return
+        }
+
+        let limit = max(
+            1,
+            min(
+                items[itemIndex].turboConcurrencyLimit ?? TurboPolicy.initialConcurrency,
+                segmentsSnapshot.count
+            )
+        )
+        let active = segmentsSnapshot.filter {
+            !$0.completed && $0.taskIdentifier != nil
+        }.count
+        var slots = max(0, limit - active)
+
+        guard slots > 0 else { return }
+
+        let candidates = segmentsSnapshot
+            .filter {
+                !$0.completed &&
+                $0.taskIdentifier == nil &&
+                ($0.nextRetryAt == nil || $0.nextRetryAt! <= now)
+            }
+            .sorted { $0.index < $1.index }
+
+        for segment in candidates {
+            guard slots > 0 else { break }
+
+            var resumeData: Data?
+
+            if let resumeName = segment.resumeDataFile {
+                let resumeURL = resumeDirectory.appendingPathComponent(resumeName)
+                resumeData = try? Data(contentsOf: resumeURL)
+                try? fileManager.removeItem(at: resumeURL)
+
+                update(id) { item in
+                    guard var segments = item.segments,
+                          let position = segments.firstIndex(where: { $0.index == segment.index })
+                    else { return }
+                    segments[position].resumeDataFile = nil
+                    item.segments = segments
+                }
+            }
+
+            if resumeData == nil, segment.receivedBytes > 0 {
+                update(id) { item in
+                    guard var segments = item.segments,
+                          let position = segments.firstIndex(where: { $0.index == segment.index })
+                    else { return }
+
+                    segments[position].receivedBytes = 0
+                    item.segments = segments
+                    item.receivedBytes = segments.reduce(0) {
+                        $0 + ($1.completed ? $1.length : $1.receivedBytes)
+                    }
+                }
+            }
+
+            startSegmentTask(
+                itemID: id,
+                segmentIndex: segment.index,
+                baseRequest: baseRequest,
+                validator: validator,
+                resumeData: resumeData
+            )
+            slots -= 1
+        }
+
+        if slots > 0 {
+            let futureDates = segmentsSnapshot.compactMap { segment -> Date? in
+                guard !segment.completed,
+                      segment.taskIdentifier == nil,
+                      let retryAt = segment.nextRetryAt,
+                      retryAt > now
+                else { return nil }
+                return retryAt
+            }
+
+            if let earliest = futureDates.min() {
+                scheduleTurboLaunch(id: id, after: earliest.timeIntervalSince(now))
+            }
+        }
+
+        saveItems()
+    }
+
+    private func scheduleTurboLaunch(id: UUID, after delay: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.25, delay)) { [weak self] in
+            guard let self,
+                  let itemIndex = self.index(of: id),
+                  self.items[itemIndex].state == .downloading,
+                  self.items[itemIndex].transferMode == .turbo
+            else { return }
+
+            if let until = self.items[itemIndex].rateLimitedUntil, until <= Date() {
+                self.update(id) { $0.rateLimitedUntil = nil }
+            }
+
+            self.launchTurboTasksIfNeeded(id: id)
+        }
+    }
+
+    private func handleTurboRateLimit(
+        id: UUID,
+        segmentIndex: Int,
+        response: HTTPURLResponse
+    ) {
+        guard let itemIndex = index(of: id),
+              items[itemIndex].transferMode == .turbo,
+              let segments = items[itemIndex].segments,
+              let position = segments.firstIndex(where: { $0.index == segmentIndex })
+        else { return }
+
+        let strike = (items[itemIndex].turboRateLimitCount ?? 0) + 1
+        guard strike <= TurboPolicy.maximumAutomaticRetries else {
+            fail(
+                id: id,
+                message: "The server keeps rate-limiting Turbo requests (HTTP \(response.statusCode)). Retry later.",
+                notify: true
+            )
+            return
+        }
+
+        let currentLimit = items[itemIndex].turboConcurrencyLimit ?? TurboPolicy.initialConcurrency
+        let newLimit = TurboPolicy.reducedConcurrency(current: currentLimit)
+        let delay = TurboPolicy.rateLimitDelay(
+            retryAfter: response.value(forHTTPHeaderField: "Retry-After"),
+            strike: strike
+        )
+        let retryAt = Date().addingTimeInterval(delay)
+
+        if let resumeName = segments[position].resumeDataFile {
+            try? fileManager.removeItem(at: resumeDirectory.appendingPathComponent(resumeName))
+        }
+
+        update(id) { item in
+            guard var currentSegments = item.segments,
+                  let currentPosition = currentSegments.firstIndex(where: { $0.index == segmentIndex })
+            else { return }
+
+            currentSegments[currentPosition].taskIdentifier = nil
+            currentSegments[currentPosition].resumeDataFile = nil
+            currentSegments[currentPosition].receivedBytes = 0
+            currentSegments[currentPosition].nextRetryAt = retryAt
+            currentSegments[currentPosition].retryCount =
+                (currentSegments[currentPosition].retryCount ?? 0) + 1
+
+            item.segments = currentSegments
+            item.receivedBytes = currentSegments.reduce(0) {
+                $0 + ($1.completed ? $1.length : $1.receivedBytes)
+            }
+            item.turboConcurrencyLimit = newLimit
+            item.turboRateLimitCount = strike
+            item.rateLimitedUntil = retryAt
+            item.errorMessage = nil
+            item.bytesPerSecond = nil
+            item.etaSeconds = nil
+            item.state = .downloading
+        }
+
+        progressSamples[id] = nil
+        saveItems()
+        suspendTurboTasksForBackoff(id: id)
+        scheduleTurboLaunch(id: id, after: delay)
+    }
+
+    private func suspendTurboTasksForBackoff(id: UUID) {
+        session.getAllTasks { [weak self] tasks in
+            guard let self else { return }
+
+            for task in tasks {
+                guard let downloadTask = task as? URLSessionDownloadTask,
+                      let identity = TurboTaskDescription.parse(task.taskDescription),
+                      identity.itemID == id,
+                      let segmentIndex = identity.segmentIndex
+                else { continue }
+
+                downloadTask.cancel(byProducingResumeData: { data in
+                    DispatchQueue.main.async {
+                        guard let itemIndex = self.index(of: id),
+                              var segments = self.items[itemIndex].segments,
+                              let position = segments.firstIndex(where: { $0.index == segmentIndex }),
+                              !segments[position].completed
+                        else { return }
+
+                        segments[position].taskIdentifier = nil
+
+                        if let data {
+                            let fileName = id.uuidString + "-segment-\(segmentIndex).resume"
+                            let url = self.resumeDirectory.appendingPathComponent(fileName)
+                            if (try? data.write(to: url, options: .atomic)) != nil {
+                                segments[position].resumeDataFile = fileName
+                            }
+                        }
+
+                        self.update(id) { $0.segments = segments }
+                        self.saveItems()
+                    }
+                })
+            }
+        }
+    }
+
     private func startSingleDownload(
         itemID: UUID,
         request originalRequest: URLRequest,
