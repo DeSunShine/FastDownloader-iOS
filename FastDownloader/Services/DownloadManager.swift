@@ -313,6 +313,9 @@ final class DownloadManager: NSObject, ObservableObject {
             if $0.expectedSHA256Base64 == nil {
                 $0.expectedSHA256Base64 = expectedSHA256
             }
+            if $0.expectedBytes <= 0, response.expectedContentLength > 0 {
+                $0.expectedBytes = response.expectedContentLength
+            }
         }
     }
 
@@ -584,12 +587,13 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
             if AppSettings.shared.verifyDownloads {
                 verifyFile(destination, itemID: id)
             } else {
-                let contentEncoding = items[index(of: id) ?? 0].responseContentEncoding?
+                guard let itemIndex = index(of: id) else { return }
+                let contentEncoding = items[itemIndex].responseContentEncoding?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .lowercased()
                 let canStrictlyCheckBodyBytes = contentEncoding == nil || contentEncoding == "" || contentEncoding == "identity"
                 let fileSize = Int64((try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
-                let expected = items[index(of: id) ?? 0].expectedBytes
+                let expected = items[itemIndex].expectedBytes
 
                 if canStrictlyCheckBodyBytes, expected > 0, fileSize != expected {
                     try? fileManager.removeItem(at: destination)
