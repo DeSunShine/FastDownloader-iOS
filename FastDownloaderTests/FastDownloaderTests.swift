@@ -70,6 +70,28 @@ final class FastDownloaderTests: XCTestCase {
         )
     }
 
+    func testDownloadNotificationText() {
+        let completed = DownloadItem(
+            sourceURL: "https://example.com/file.bin",
+            filename: "file.bin",
+            state: .completed,
+            receivedBytes: 100_000_000,
+            expectedBytes: 100_000_000,
+            integrityStatus: .sizeVerified
+        )
+        let completedBody = DownloadNotificationManager.completionBody(for: completed)
+        XCTAssertTrue(completedBody.contains("file.bin"))
+        XCTAssertTrue(completedBody.contains("File size verified"))
+
+        var failed = completed
+        failed.state = .failed
+        failed.errorMessage = "Connection lost"
+        XCTAssertEqual(
+            DownloadNotificationManager.failureBody(for: failed),
+            "file.bin • Connection lost"
+        )
+    }
+
     func testURLResolutionAddsHTTPS() {
         XCTAssertEqual(
             BrowserStore.resolvedURL(from: "example.com")?.absoluteString,
@@ -146,8 +168,8 @@ final class FastDownloaderTests: XCTestCase {
         XCTAssertEqual(DurationFormatter.remaining(3_660), "1h 1m left")
     }
 
-    func testAppVersionIs031() {
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.3.1")
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "9")
+    func testAppVersionIs032() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.3.2")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "10")
     }
 }
