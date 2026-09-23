@@ -32,8 +32,48 @@ enum ContentRangeParser {
     }
 }
 
+enum RetryAfterParser {
+    static func delay(from value: String?, now: Date = Date()) -> TimeInterval? {
+        guard let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty
+        else { return nil }
+
+        if let seconds = TimeInterval(raw), seconds >= 0 {
+            return seconds
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE',' dd MMM yyyy HH':'mm':'ss z"
+
+        guard let date = formatter.date(from: raw) else { return nil }
+        return max(0, date.timeIntervalSince(now))
+    }
+}
+
 enum TurboPolicy {
     static let minimumTurboSize: Int64 = 20 * 1024 * 1024
+    static let initialConcurrency = 2
+    static let maximumAutomaticRetries = 6
+
+    static func rateLimitDelay(retryAfter: String?, strike: Int, now: Date = Date()) -> TimeInterval {
+        if let serverDelay = RetryAfterParser.delay(from: retryAfter, now: now) {
+            return min(max(serverDelay, 1), 120)
+        }
+
+        let exponent = max(0, min(strike - 1, 5))
+        return min(5 * pow(2, Double(exponent)), 120)
+    }
+
+    static func networkRetryDelay(attempt: Int) -> TimeInterval {
+        let exponent = max(0, min(attempt - 1, 5))
+        return min(pow(2, Double(exponent)), 30)
+    }
+
+    static func reducedConcurrency(current: Int) -> Int {
+        max(1, current / 2)
+    }
 
     static func segmentCount(for totalBytes: Int64) -> Int {
         switch totalBytes {
