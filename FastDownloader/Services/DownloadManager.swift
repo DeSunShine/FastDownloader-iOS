@@ -833,58 +833,52 @@ final class DownloadManager: NSObject, ObservableObject {
 
     private func resumeTurbo(id: UUID) {
         guard let itemIndex = index(of: id),
+              items[itemIndex].transferMode == .turbo,
               let segmentsSnapshot = items[itemIndex].segments,
-              let baseRequest = reconstructedRequest(from: items[itemIndex]),
-              let validator = TurboPolicy.strongValidator(
+              !segmentsSnapshot.isEmpty,
+              reconstructedRequest(from: items[itemIndex]) != nil,
+              TurboPolicy.strongValidator(
                 etag: items[itemIndex].responseETag,
                 lastModified: items[itemIndex].responseLastModified
-              )
+              ) != nil
         else {
             fallbackTurboToSingle(id: id, reason: "Turbo resume metadata is unavailable")
             return
         }
 
-        update(id) {
-            $0.state = .downloading
-            $0.errorMessage = nil
-            $0.bytesPerSecond = nil
-            $0.etaSeconds = nil
-        }
-        progressSamples[id] = nil
+        let wasFailed = items[itemIndex].state == .failed
 
-        for segment in segmentsSnapshot where !segment.completed {
-            var resumeData: Data?
+        update(id) { item in
+            item.state = .downloading
+            item.errorMessage = nil
+            item.bytesPerSecond = nil
+            item.etaSeconds = nil
+            item.rateLimitedUntil = nil
 
-            if let resumeName = segment.resumeDataFile {
-                let url = resumeDirectory.appendingPathComponent(resumeName)
-                resumeData = try? Data(contentsOf: url)
-                try? fileManager.removeItem(at: url)
+            if item.turboConcurrencyLimit == nil {
+                item.turboConcurrencyLimit = min(
+                    TurboPolicy.initialConcurrency,
+                    segmentsSnapshot.count
+                )
             }
 
-            if resumeData == nil {
-                update(id) { item in
-                    guard var segments = item.segments,
-                          let position = segments.firstIndex(where: { $0.index == segment.index })
-                    else { return }
-                    segments[position].receivedBytes = 0
-                    segments[position].resumeDataFile = nil
-                    item.segments = segments
-                    item.receivedBytes = segments.reduce(0) {
-                        $0 + ($1.completed ? $1.length : $1.receivedBytes)
+            if wasFailed {
+                item.turboRateLimitCount = 0
+
+                if var segments = item.segments {
+                    for index in segments.indices where !segments[index].completed {
+                        segments[index].retryCount = 0
+                        segments[index].nextRetryAt = nil
+                        segments[index].taskIdentifier = nil
                     }
+                    item.segments = segments
                 }
             }
-
-            startSegmentTask(
-                itemID: id,
-                segmentIndex: segment.index,
-                baseRequest: baseRequest,
-                validator: validator,
-                resumeData: resumeData
-            )
         }
 
+        progressSamples[id] = nil
         saveItems()
+        launchTurboTasksIfNeeded(id: id)
     }
 
     private func fallbackTurboToSingle(id: UUID, reason: String) {
