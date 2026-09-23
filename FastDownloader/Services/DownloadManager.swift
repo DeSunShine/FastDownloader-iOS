@@ -708,11 +708,6 @@ final class DownloadManager: NSObject, ObservableObject {
         // Keep healthy in-flight segments running. We only stop launching new
         // work until the server's cooldown expires.
         scheduleTurboLaunch(id: id, after: delay)
-        scheduleTurboRamp(
-            id: id,
-            expectedStrike: strike,
-            after: delay + (TurboPolicy.rampDelay * 2)
-        )
     }
 
     private func suspendTurboTasksForBackoff(id: UUID) {
@@ -1221,6 +1216,139 @@ final class DownloadManager: NSObject, ObservableObject {
         }
 
         return nil
+    }
+
+    private func evaluateTurboTuning(
+        id: UUID,
+        aggregateBytes: Int64,
+        now: Date
+    ) {
+        guard var tuning = turboTuning[id],
+              !tuning.settled,
+              let itemIndex = index(of: id),
+              items[itemIndex].transferMode == .turbo,
+              items[itemIndex].state == .downloading,
+              let segments = items[itemIndex].segments,
+              !segments.isEmpty,
+              items[itemIndex].rateLimitedUntil == nil
+        else { return }
+
+        let elapsed = now.timeIntervalSince(tuning.stageStartedAt)
+        let deltaBytes = max(0, aggregateBytes - tuning.stageStartBytes)
+
+        guard elapsed >= TurboPolicy.tuningWindow,
+              deltaBytes >= TurboPolicy.tuningMinimumBytes
+        else { return }
+
+        let measuredSpeed = Double(deltaBytes) / elapsed
+        guard measuredSpeed > 0 else { return }
+
+        let current = max(1, min(tuning.currentConcurrency, segments.count))
+
+        if tuning.bestSpeed <= 0 {
+            tuning.bestSpeed = measuredSpeed
+            tuning.bestConcurrency = current
+        } else if measuredSpeed >= tuning.bestSpeed * TurboPolicy.tuningImprovementThreshold {
+            tuning.bestSpeed = measuredSpeed
+            tuning.bestConcurrency = current
+        } else {
+            tuning.settled = true
+            turboTuning[id] = tuning
+
+            let chosen = max(1, min(tuning.bestConcurrency, segments.count))
+            update(id) {
+                $0.turboConcurrencyLimit = chosen
+                $0.turboBestConcurrency = chosen
+                $0.turboAutoTuning = false
+            }
+
+            if chosen < current {
+                trimTurboConcurrency(id: id, target: chosen)
+            }
+
+            saveItems()
+            return
+        }
+
+        if current >= segments.count {
+            tuning.settled = true
+            turboTuning[id] = tuning
+            update(id) {
+                $0.turboConcurrencyLimit = tuning.bestConcurrency
+                $0.turboBestConcurrency = tuning.bestConcurrency
+                $0.turboAutoTuning = false
+            }
+            saveItems()
+            return
+        }
+
+        let next = min(segments.count, current + 1)
+        tuning.currentConcurrency = next
+        tuning.stageStartedAt = now
+        tuning.stageStartBytes = aggregateBytes
+        turboTuning[id] = tuning
+
+        update(id) {
+            $0.turboConcurrencyLimit = next
+            $0.turboBestConcurrency = tuning.bestConcurrency
+            $0.turboAutoTuning = true
+        }
+
+        launchTurboTasksIfNeeded(id: id)
+        saveItems()
+    }
+
+    private func trimTurboConcurrency(id: UUID, target: Int) {
+        let target = max(1, target)
+
+        session.getAllTasks { [weak self] tasks in
+            guard let self else { return }
+
+            let activeSegments: [(URLSessionDownloadTask, Int)] = tasks.compactMap { task in
+                guard let downloadTask = task as? URLSessionDownloadTask,
+                      let identity = TurboTaskDescription.parse(task.taskDescription),
+                      identity.itemID == id,
+                      let segmentIndex = identity.segmentIndex
+                else { return nil }
+                return (downloadTask, segmentIndex)
+            }
+            .sorted { $0.1 > $1.1 }
+
+            guard activeSegments.count > target else { return }
+
+            for (task, segmentIndex) in activeSegments.prefix(activeSegments.count - target) {
+                task.cancel(byProducingResumeData: { data in
+                    DispatchQueue.main.async {
+                        guard let itemIndex = self.index(of: id),
+                              var segments = self.items[itemIndex].segments,
+                              let position = segments.firstIndex(where: { $0.index == segmentIndex }),
+                              !segments[position].completed
+                        else { return }
+
+                        segments[position].taskIdentifier = nil
+
+                        if let data {
+                            let fileName = id.uuidString + "-segment-\(segmentIndex).resume"
+                            let url = self.resumeDirectory.appendingPathComponent(fileName)
+                            if (try? data.write(to: url, options: .atomic)) != nil {
+                                segments[position].resumeDataFile = fileName
+                            }
+                        } else {
+                            segments[position].receivedBytes = 0
+                            segments[position].resumeDataFile = nil
+                        }
+
+                        self.update(id) { item in
+                            item.segments = segments
+                            item.receivedBytes = segments.reduce(0) {
+                                $0 + ($1.completed ? $1.length : $1.receivedBytes)
+                            }
+                        }
+                        self.saveItems()
+                    }
+                })
+            }
+        }
     }
 
     private func updateSpeed(id: UUID, aggregateBytes: Int64) {
