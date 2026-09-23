@@ -57,8 +57,12 @@ final class DownloadManager: NSObject, ObservableObject {
                 let available = path.status == .satisfied
                 self.networkAvailable = available
 
-                for item in self.items where item.state == .downloading {
-                    self.update(item.id) {
+                let activeIDs = self.items
+                    .filter { $0.state == .downloading }
+                    .map(\.id)
+
+                for id in activeIDs {
+                    self.update(id) {
                         $0.waitingForNetwork = !available
                         if !available {
                             $0.bytesPerSecond = nil
@@ -982,6 +986,8 @@ final class DownloadManager: NSObject, ObservableObject {
             $0.errorMessage = nil
             $0.bytesPerSecond = nil
             $0.etaSeconds = nil
+            $0.waitingForNetwork = false
+            $0.recoveringFromStall = false
             $0.state = .downloading
         }
 
@@ -1106,6 +1112,8 @@ final class DownloadManager: NSObject, ObservableObject {
             $0.taskIdentifier = task.taskIdentifier
             $0.bytesPerSecond = nil
             $0.etaSeconds = nil
+            $0.waitingForNetwork = false
+            $0.recoveringFromStall = false
             if !resumedFromPartialData {
                 $0.receivedBytes = 0
             }
