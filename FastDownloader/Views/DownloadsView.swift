@@ -48,7 +48,13 @@ private struct DownloadRow: View {
                         if item.transferMode == .turbo,
                            let count = item.segments?.count {
                             Text("•")
-                            if let limit = item.turboConcurrencyLimit {
+
+                            if item.turboAutoTuning == true,
+                               let limit = item.turboConcurrencyLimit {
+                                Text("Auto-Turbo ×\(count) • testing \(limit)")
+                            } else if let best = item.turboBestConcurrency {
+                                Text("Auto-Turbo ×\(count) • chose \(best)")
+                            } else if let limit = item.turboConcurrencyLimit {
                                 Text("Turbo ×\(count) • ≤\(limit) active")
                             } else {
                                 Text("Turbo ×\(count)")
