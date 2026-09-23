@@ -38,6 +38,8 @@ struct DownloadItem: Identifiable, Codable, Equatable {
     var requestHTTPMethod: String
     var requestBodyBase64: String?
     var resumeDataFile: String?
+    var bytesPerSecond: Double?
+    var etaSeconds: Double?
 
     init(
         id: UUID = UUID(),
@@ -55,7 +57,9 @@ struct DownloadItem: Identifiable, Codable, Equatable {
         requestHeaders: [String: String] = [:],
         requestHTTPMethod: String = "GET",
         requestBodyBase64: String? = nil,
-        resumeDataFile: String? = nil
+        resumeDataFile: String? = nil,
+        bytesPerSecond: Double? = nil,
+        etaSeconds: Double? = nil
     ) {
         self.id = id
         self.sourceURL = sourceURL
@@ -73,6 +77,8 @@ struct DownloadItem: Identifiable, Codable, Equatable {
         self.requestHTTPMethod = requestHTTPMethod
         self.requestBodyBase64 = requestBodyBase64
         self.resumeDataFile = resumeDataFile
+        self.bytesPerSecond = bytesPerSecond
+        self.etaSeconds = etaSeconds
     }
 
     var progress: Double {
