@@ -48,6 +48,7 @@ enum DownloadState: String, Codable, CaseIterable {
     case queued
     case downloading
     case paused
+    case merging
     case verifying
     case completed
     case failed
@@ -57,6 +58,7 @@ enum DownloadState: String, Codable, CaseIterable {
         case .queued: return "Queued"
         case .downloading: return "Downloading"
         case .paused: return "Paused"
+        case .merging: return "Merging"
         case .verifying: return "Verifying"
         case .completed: return "Completed"
         case .failed: return "Failed"
