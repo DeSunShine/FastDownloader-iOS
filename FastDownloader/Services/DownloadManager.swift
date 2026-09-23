@@ -937,7 +937,7 @@ final class DownloadManager: NSObject, ObservableObject {
         saveItems()
         launchTurboTasksIfNeeded(id: id)
 
-        let strike = items[index(of: id) ?? itemIndex].turboRateLimitCount ?? 0
+        let strike = items[itemIndex].turboRateLimitCount ?? 0
         scheduleTurboRamp(
             id: id,
             expectedStrike: strike,
