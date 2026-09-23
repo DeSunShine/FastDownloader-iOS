@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import UserNotifications
 
 @MainActor
@@ -29,7 +30,7 @@ final class DownloadNotificationManager {
         guard !UserDefaults.standard.bool(forKey: permissionRequestedKey) else { return }
 
         UserDefaults.standard.set(true, forKey: permissionRequestedKey)
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
     func notifyCompleted(_ item: DownloadItem) {
