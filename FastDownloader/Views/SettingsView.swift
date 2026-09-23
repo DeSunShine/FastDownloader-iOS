@@ -12,6 +12,7 @@ struct SettingsView: View {
                 }
 
                 Section("Downloads") {
+                    Toggle("Download Notifications", isOn: $settings.downloadNotifications)
                     Toggle("Calculate SHA-256 After Download", isOn: $settings.verifyDownloads)
 
                     LabeledContent("Background Engine") {
