@@ -284,6 +284,38 @@ final class DownloadManager: NSObject, ObservableObject {
         }
     }
 
+    private func captureResponseMetadata(from task: URLSessionTask, itemID: UUID) {
+        guard let response = task.response as? HTTPURLResponse else { return }
+
+        let contentDigest = response.value(forHTTPHeaderField: "Content-Digest")
+        let legacyDigest = response.value(forHTTPHeaderField: "Digest")
+        let expectedSHA256 = HTTPDigestParser.sha256Base64(
+            contentDigest: contentDigest,
+            legacyDigest: legacyDigest
+        )
+        let acceptRanges = response.value(forHTTPHeaderField: "Accept-Ranges")?
+            .lowercased()
+            .contains("bytes")
+
+        update(itemID) {
+            if $0.responseETag == nil {
+                $0.responseETag = response.value(forHTTPHeaderField: "ETag")
+            }
+            if $0.responseLastModified == nil {
+                $0.responseLastModified = response.value(forHTTPHeaderField: "Last-Modified")
+            }
+            if $0.responseContentEncoding == nil {
+                $0.responseContentEncoding = response.value(forHTTPHeaderField: "Content-Encoding")
+            }
+            if $0.serverAcceptsRanges == nil {
+                $0.serverAcceptsRanges = acceptRanges
+            }
+            if $0.expectedSHA256Base64 == nil {
+                $0.expectedSHA256Base64 = expectedSHA256
+            }
+        }
+    }
+
     private func destinationURL(for filename: String) -> URL {
         let sanitized = FilenameResolver.sanitize(filename)
         let base = downloadDirectory.appendingPathComponent(sanitized)
@@ -351,15 +383,70 @@ final class DownloadManager: NSObject, ObservableObject {
     }
 
     private func verifyFile(_ url: URL, itemID: UUID) {
+        guard let index = index(of: itemID) else { return }
+
+        let expectedDigest = items[index].expectedSHA256Base64
+        let expectedBytes = items[index].expectedBytes
+        let contentEncoding = items[index].responseContentEncoding?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let canStrictlyCheckBodyBytes = contentEncoding == nil || contentEncoding == "" || contentEncoding == "identity"
+
         update(itemID) { $0.state = .verifying }
         saveItems()
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
             do {
-                let hash = try FileHasher.sha256(of: url)
+                let values = try url.resourceValues(forKeys: [.fileSizeKey])
+                let fileSize = Int64(values.fileSize ?? 0)
+
+                if canStrictlyCheckBodyBytes,
+                   expectedBytes > 0,
+                   fileSize != expectedBytes {
+                    try? self?.fileManager.removeItem(at: url)
+                    DispatchQueue.main.async {
+                        self?.update(itemID) {
+                            $0.state = .failed
+                            $0.errorMessage = "Integrity check failed: expected \(ByteFormatter.string(expectedBytes)), got \(ByteFormatter.string(fileSize))."
+                            $0.localRelativePath = nil
+                            $0.bytesPerSecond = nil
+                            $0.etaSeconds = nil
+                        }
+                        self?.saveItems()
+                    }
+                    return
+                }
+
+                let digest = try FileHasher.sha256Digest(of: url)
+
+                if canStrictlyCheckBodyBytes,
+                   let expectedDigest,
+                   digest.base64 != expectedDigest {
+                    try? self?.fileManager.removeItem(at: url)
+                    DispatchQueue.main.async {
+                        self?.update(itemID) {
+                            $0.state = .failed
+                            $0.errorMessage = "Integrity check failed: the server SHA-256 does not match the downloaded file."
+                            $0.localRelativePath = nil
+                            $0.sha256 = digest.hex
+                            $0.bytesPerSecond = nil
+                            $0.etaSeconds = nil
+                        }
+                        self?.saveItems()
+                    }
+                    return
+                }
+
                 DispatchQueue.main.async {
                     self?.update(itemID) {
-                        $0.sha256 = hash
+                        $0.sha256 = digest.hex
+                        if canStrictlyCheckBodyBytes, expectedDigest != nil {
+                            $0.integrityStatus = .serverSHA256Verified
+                        } else if canStrictlyCheckBodyBytes, expectedBytes > 0, fileSize == expectedBytes {
+                            $0.integrityStatus = .sizeVerified
+                        } else {
+                            $0.integrityStatus = .localSHA256
+                        }
                         $0.state = .completed
                         $0.bytesPerSecond = nil
                         $0.etaSeconds = nil
@@ -372,13 +459,14 @@ final class DownloadManager: NSObject, ObservableObject {
                         $0.state = .completed
                         $0.bytesPerSecond = nil
                         $0.etaSeconds = nil
-                        $0.errorMessage = "File saved, but SHA-256 verification failed: " + error.localizedDescription
+                        $0.errorMessage = "File saved, but SHA-256 calculation failed: " + error.localizedDescription
                     }
                     self?.saveItems()
                 }
             }
         }
     }
+
 }
 
 extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
@@ -390,6 +478,7 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
         totalBytesExpectedToWrite: Int64
     ) {
         guard let id = itemID(for: downloadTask) else { return }
+        captureResponseMetadata(from: downloadTask, itemID: id)
 
         let now = Date()
         var smoothedSpeed: Double?
@@ -452,6 +541,7 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
         didFinishDownloadingTo location: URL
     ) {
         guard let id = itemID(for: downloadTask) else { return }
+        captureResponseMetadata(from: downloadTask, itemID: id)
 
         if let response = downloadTask.response as? HTTPURLResponse, !(200...299).contains(response.statusCode) {
             update(id) {
@@ -494,10 +584,29 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
             if AppSettings.shared.verifyDownloads {
                 verifyFile(destination, itemID: id)
             } else {
-                update(id) {
-                    $0.state = .completed
-                    $0.bytesPerSecond = nil
-                    $0.etaSeconds = nil
+                let contentEncoding = items[index(of: id) ?? 0].responseContentEncoding?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                let canStrictlyCheckBodyBytes = contentEncoding == nil || contentEncoding == "" || contentEncoding == "identity"
+                let fileSize = Int64((try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+                let expected = items[index(of: id) ?? 0].expectedBytes
+
+                if canStrictlyCheckBodyBytes, expected > 0, fileSize != expected {
+                    try? fileManager.removeItem(at: destination)
+                    update(id) {
+                        $0.state = .failed
+                        $0.localRelativePath = nil
+                        $0.errorMessage = "Integrity check failed: downloaded file size is incomplete."
+                        $0.bytesPerSecond = nil
+                        $0.etaSeconds = nil
+                    }
+                } else {
+                    update(id) {
+                        $0.state = .completed
+                        $0.integrityStatus = canStrictlyCheckBodyBytes && expected > 0 ? .sizeVerified : nil
+                        $0.bytesPerSecond = nil
+                        $0.etaSeconds = nil
+                    }
                 }
                 saveItems()
             }
