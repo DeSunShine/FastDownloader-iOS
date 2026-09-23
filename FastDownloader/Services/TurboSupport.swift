@@ -56,6 +56,9 @@ enum TurboPolicy {
     static let minimumTurboSize: Int64 = 20 * 1024 * 1024
     static let initialConcurrency = 1
     static let rampDelay: TimeInterval = 0.8
+    static let tuningWindow: TimeInterval = 1.5
+    static let tuningMinimumBytes: Int64 = 256 * 1024
+    static let tuningImprovementThreshold = 1.08
     static let maximumAutomaticRetries = 6
 
     static func rateLimitDelay(retryAfter: String?, strike: Int, now: Date = Date()) -> TimeInterval {
