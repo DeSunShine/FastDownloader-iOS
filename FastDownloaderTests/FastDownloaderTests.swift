@@ -151,17 +151,20 @@ final class FastDownloaderTests: XCTestCase {
     }
 
     func testTurboBackoffPolicy() {
+        XCTAssertEqual(TurboPolicy.initialConcurrency, 1)
+        XCTAssertEqual(TurboPolicy.rampDelay, 0.8, accuracy: 0.001)
         XCTAssertEqual(TurboPolicy.reducedConcurrency(current: 4), 2)
-        XCTAssertEqual(TurboPolicy.reducedConcurrency(current: 3), 1)
+        XCTAssertEqual(TurboPolicy.reducedConcurrency(current: 3), 2)
+        XCTAssertEqual(TurboPolicy.reducedConcurrency(current: 2), 1)
         XCTAssertEqual(TurboPolicy.reducedConcurrency(current: 1), 1)
 
         XCTAssertEqual(
             TurboPolicy.rateLimitDelay(retryAfter: nil, strike: 1),
-            5
+            2
         )
         XCTAssertEqual(
             TurboPolicy.rateLimitDelay(retryAfter: nil, strike: 3),
-            20
+            8
         )
         XCTAssertEqual(TurboPolicy.networkRetryDelay(attempt: 1), 1)
         XCTAssertEqual(TurboPolicy.networkRetryDelay(attempt: 5), 16)
@@ -243,8 +246,8 @@ final class FastDownloaderTests: XCTestCase {
         XCTAssertEqual(DurationFormatter.remaining(3_660), "1h 1m left")
     }
 
-    func testAppVersionIs041() {
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.4.1")
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "12")
+    func testAppVersionIs042() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.4.2")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "13")
     }
 }
