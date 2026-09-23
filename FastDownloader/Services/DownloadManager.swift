@@ -85,7 +85,7 @@ final class DownloadManager: NSObject, ObservableObject {
 
     private func startStallWatchdog() {
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 3, repeating: 3)
+        timer.schedule(deadline: .now() + StallPolicy.watchdogInterval, repeating: StallPolicy.watchdogInterval)
         timer.setEventHandler { [weak self] in
             self?.checkForStalledTasks()
         }
@@ -120,9 +120,9 @@ final class DownloadManager: NSObject, ObservableObject {
 
                     let timeout: TimeInterval
                     if identity.segmentIndex != nil {
-                        timeout = 10
+                        timeout = StallPolicy.turboSegmentTimeout
                     } else {
-                        timeout = 12
+                        timeout = StallPolicy.singleTimeout
                     }
 
                     guard silence >= timeout,
@@ -167,7 +167,7 @@ final class DownloadManager: NSObject, ObservableObject {
             task.suspend()
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self, weak task] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + StallPolicy.softReconnectDelay) { [weak self, weak task] in
             guard let self, let task else { return }
 
             if task.state == .suspended {
@@ -219,7 +219,7 @@ final class DownloadManager: NSObject, ObservableObject {
                 }
 
                 segments[position].taskIdentifier = nil
-                segments[position].nextRetryAt = Date().addingTimeInterval(0.5)
+                segments[position].nextRetryAt = Date().addingTimeInterval(StallPolicy.turboRestartDelay)
 
                 if let data {
                     let fileName = itemID.uuidString + "-segment-\(segmentIndex)-stall.resume"
@@ -243,7 +243,7 @@ final class DownloadManager: NSObject, ObservableObject {
                 self.recoveringTaskIDs.remove(taskID)
                 self.taskProgress[taskID] = nil
                 self.saveItems()
-                self.scheduleTurboLaunch(id: itemID, after: 0.5)
+                self.scheduleTurboLaunch(id: itemID, after: StallPolicy.turboRestartDelay)
             }
         })
     }
