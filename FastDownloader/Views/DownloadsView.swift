@@ -77,6 +77,16 @@ private struct DownloadRow: View {
 
             progressSection
 
+            if item.waitingForNetwork == true {
+                Label("Waiting for network…", systemImage: "wifi.slash")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else if item.recoveringFromStall == true {
+                Label("Recovering stalled connection…", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
             if let limitedUntil = item.rateLimitedUntil,
                limitedUntil > Date() {
                 Label(
@@ -158,7 +168,11 @@ private struct DownloadRow: View {
             .foregroundStyle(.secondary)
 
             HStack(spacing: 6) {
-                if let speed = item.bytesPerSecond, speed > 0 {
+                if item.waitingForNetwork == true {
+                    Text("Waiting for network…")
+                } else if item.recoveringFromStall == true {
+                    Text("Recovering…")
+                } else if let speed = item.bytesPerSecond, speed > 0 {
                     Text(SpeedFormatter.string(speed))
                 } else {
                     Text("Measuring speed…")
