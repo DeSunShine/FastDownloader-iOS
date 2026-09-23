@@ -3,24 +3,28 @@ import SwiftUI
 struct RootView: View {
     @ObservedObject var browser: BrowserStore
     @EnvironmentObject private var downloads: DownloadManager
+    @StateObject private var router = AppRouter.shared
 
     var body: some View {
-        TabView {
+        TabView(selection: $router.selectedTab) {
             BrowserView(store: browser)
                 .tabItem {
                     Label("Browser", systemImage: "globe")
                 }
+                .tag(AppRouter.Tab.browser.rawValue)
 
             DownloadsView()
                 .tabItem {
                     Label("Downloads", systemImage: "arrow.down.circle")
                 }
                 .badge(activeDownloadCount)
+                .tag(AppRouter.Tab.downloads.rawValue)
 
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
+                .tag(AppRouter.Tab.settings.rawValue)
         }
     }
 
