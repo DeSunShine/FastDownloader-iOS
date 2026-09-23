@@ -1,6 +1,20 @@
 import Foundation
 import Combine
 
+enum DownloadIntegrityStatus: String, Codable {
+    case localSHA256
+    case sizeVerified
+    case serverSHA256Verified
+
+    var title: String {
+        switch self {
+        case .localSHA256: return "Local SHA-256 calculated"
+        case .sizeVerified: return "File size verified"
+        case .serverSHA256Verified: return "SHA-256 verified against server"
+        }
+    }
+}
+
 enum DownloadState: String, Codable, CaseIterable {
     case queued
     case downloading
@@ -40,6 +54,12 @@ struct DownloadItem: Identifiable, Codable, Equatable {
     var resumeDataFile: String?
     var bytesPerSecond: Double?
     var etaSeconds: Double?
+    var responseETag: String?
+    var responseLastModified: String?
+    var responseContentEncoding: String?
+    var serverAcceptsRanges: Bool?
+    var expectedSHA256Base64: String?
+    var integrityStatus: DownloadIntegrityStatus?
 
     init(
         id: UUID = UUID(),
@@ -59,7 +79,13 @@ struct DownloadItem: Identifiable, Codable, Equatable {
         requestBodyBase64: String? = nil,
         resumeDataFile: String? = nil,
         bytesPerSecond: Double? = nil,
-        etaSeconds: Double? = nil
+        etaSeconds: Double? = nil,
+        responseETag: String? = nil,
+        responseLastModified: String? = nil,
+        responseContentEncoding: String? = nil,
+        serverAcceptsRanges: Bool? = nil,
+        expectedSHA256Base64: String? = nil,
+        integrityStatus: DownloadIntegrityStatus? = nil
     ) {
         self.id = id
         self.sourceURL = sourceURL
@@ -79,6 +105,12 @@ struct DownloadItem: Identifiable, Codable, Equatable {
         self.resumeDataFile = resumeDataFile
         self.bytesPerSecond = bytesPerSecond
         self.etaSeconds = etaSeconds
+        self.responseETag = responseETag
+        self.responseLastModified = responseLastModified
+        self.responseContentEncoding = responseContentEncoding
+        self.serverAcceptsRanges = serverAcceptsRanges
+        self.expectedSHA256Base64 = expectedSHA256Base64
+        self.integrityStatus = integrityStatus
     }
 
     var progress: Double {
