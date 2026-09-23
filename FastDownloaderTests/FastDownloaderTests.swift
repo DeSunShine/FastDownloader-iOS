@@ -92,6 +92,59 @@ final class FastDownloaderTests: XCTestCase {
         )
     }
 
+    func testContentRangeParsing() {
+        XCTAssertEqual(
+            ContentRangeParser.parse("bytes 0-0/100000000"),
+            ContentRangeInfo(start: 0, end: 0, total: 100_000_000)
+        )
+        XCTAssertNil(ContentRangeParser.parse("bytes 0-99/*"))
+        XCTAssertNil(ContentRangeParser.parse("bytes 100-99/1000"))
+    }
+
+    func testAdaptiveTurboPolicy() {
+        XCTAssertEqual(TurboPolicy.segmentCount(for: 10 * 1024 * 1024), 1)
+        XCTAssertEqual(TurboPolicy.segmentCount(for: 30 * 1024 * 1024), 2)
+        XCTAssertEqual(TurboPolicy.segmentCount(for: 100 * 1024 * 1024), 4)
+        XCTAssertEqual(TurboPolicy.segmentCount(for: 700 * 1024 * 1024), 8)
+    }
+
+    func testTurboSegmentsCoverFileExactlyOnce() {
+        let total: Int64 = 100_000_003
+        let segments = TurboPolicy.makeSegments(totalBytes: total, count: 4)
+
+        XCTAssertEqual(segments.count, 4)
+        XCTAssertEqual(segments.first?.startByte, 0)
+        XCTAssertEqual(segments.last?.endByte, total - 1)
+        XCTAssertEqual(segments.reduce(0) { $0 + $1.length }, total)
+
+        for pair in zip(segments, segments.dropFirst()) {
+            XCTAssertEqual(pair.0.endByte + 1, pair.1.startByte)
+        }
+    }
+
+    func testTurboTaskDescriptionRoundTrip() {
+        let id = UUID()
+        let segment = TurboTaskDescription.segment(itemID: id, index: 3)
+        let parsed = TurboTaskDescription.parse(segment)
+        XCTAssertEqual(parsed?.itemID, id)
+        XCTAssertEqual(parsed?.segmentIndex, 3)
+
+        let single = TurboTaskDescription.single(itemID: id)
+        XCTAssertEqual(TurboTaskDescription.parse(single)?.itemID, id)
+        XCTAssertNil(TurboTaskDescription.parse(single)?.segmentIndex)
+    }
+
+    func testTurboValidatorRejectsWeakETag() {
+        XCTAssertEqual(
+            TurboPolicy.strongValidator(etag: "\"strong-tag\"", lastModified: nil),
+            "\"strong-tag\""
+        )
+        XCTAssertEqual(
+            TurboPolicy.strongValidator(etag: "W/\"weak-tag\"", lastModified: "Wed, 21 Oct 2015 07:28:00 GMT"),
+            "Wed, 21 Oct 2015 07:28:00 GMT"
+        )
+    }
+
     func testURLResolutionAddsHTTPS() {
         XCTAssertEqual(
             BrowserStore.resolvedURL(from: "example.com")?.absoluteString,
@@ -168,8 +221,8 @@ final class FastDownloaderTests: XCTestCase {
         XCTAssertEqual(DurationFormatter.remaining(3_660), "1h 1m left")
     }
 
-    func testAppVersionIs032() {
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.3.2")
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "10")
+    func testAppVersionIs040() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.4.0")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "11")
     }
 }
