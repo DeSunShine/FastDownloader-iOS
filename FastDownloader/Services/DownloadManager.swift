@@ -12,6 +12,17 @@ final class DownloadManager: NSObject, ObservableObject {
     private var taskToItem: [Int: UUID] = [:]
     private var progressSamples: [UUID: (date: Date, bytes: Int64, speed: Double)] = [:]
 
+    private struct TurboTuningState {
+        var stageStartedAt: Date
+        var stageStartBytes: Int64
+        var currentConcurrency: Int
+        var bestConcurrency: Int
+        var bestSpeed: Double
+        var settled: Bool
+    }
+
+    private var turboTuning: [UUID: TurboTuningState] = [:]
+
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.background(withIdentifier: sessionIdentifier)
         configuration.sessionSendsLaunchEvents = true
@@ -135,6 +146,7 @@ final class DownloadManager: NSObject, ObservableObject {
             $0.etaSeconds = nil
         }
         progressSamples[id] = nil
+        turboTuning[id] = nil
         saveItems()
 
         if items[itemIndex].transferMode == .turbo {
@@ -355,6 +367,8 @@ final class DownloadManager: NSObject, ObservableObject {
             $0.turboConcurrencyLimit = min(TurboPolicy.initialConcurrency, segments.count)
             $0.turboRateLimitCount = 0
             $0.rateLimitedUntil = nil
+            $0.turboAutoTuning = true
+            $0.turboBestConcurrency = 1
             $0.errorMessage = nil
             $0.state = .downloading
             if let suggestedFilename, !suggestedFilename.isEmpty {
@@ -362,13 +376,17 @@ final class DownloadManager: NSObject, ObservableObject {
             }
         }
 
+        turboTuning[itemID] = TurboTuningState(
+            stageStartedAt: Date(),
+            stageStartBytes: 0,
+            currentConcurrency: 1,
+            bestConcurrency: 1,
+            bestSpeed: 0,
+            settled: false
+        )
+
         saveItems()
         launchTurboTasksIfNeeded(id: itemID)
-        scheduleTurboRamp(
-            id: itemID,
-            expectedStrike: 0,
-            after: TurboPolicy.rampDelay
-        )
     }
 
     private func startSegmentTask(
@@ -675,6 +693,8 @@ final class DownloadManager: NSObject, ObservableObject {
             item.turboConcurrencyLimit = newLimit
             item.turboRateLimitCount = strike
             item.rateLimitedUntil = retryAt
+            item.turboAutoTuning = false
+            item.turboBestConcurrency = newLimit
             item.errorMessage = nil
             item.bytesPerSecond = nil
             item.etaSeconds = nil
@@ -682,6 +702,7 @@ final class DownloadManager: NSObject, ObservableObject {
         }
 
         progressSamples[id] = nil
+        turboTuning[id] = nil
         saveItems()
 
         // Keep healthy in-flight segments running. We only stop launching new
@@ -934,15 +955,31 @@ final class DownloadManager: NSObject, ObservableObject {
         }
 
         progressSamples[id] = nil
+
+        let current = max(
+            1,
+            min(
+                items[itemIndex].turboConcurrencyLimit ?? TurboPolicy.initialConcurrency,
+                segmentsSnapshot.count
+            )
+        )
+
+        turboTuning[id] = TurboTuningState(
+            stageStartedAt: Date(),
+            stageStartBytes: items[itemIndex].receivedBytes,
+            currentConcurrency: current,
+            bestConcurrency: current,
+            bestSpeed: 0,
+            settled: false
+        )
+
+        update(id) {
+            $0.turboAutoTuning = true
+            $0.turboBestConcurrency = current
+        }
+
         saveItems()
         launchTurboTasksIfNeeded(id: id)
-
-        let strike = items[itemIndex].turboRateLimitCount ?? 0
-        scheduleTurboRamp(
-            id: id,
-            expectedStrike: strike,
-            after: TurboPolicy.rampDelay
-        )
     }
 
     private func fallbackTurboToSingle(id: UUID, reason: String) {
@@ -1213,6 +1250,12 @@ final class DownloadManager: NSObject, ObservableObject {
                 $0.etaSeconds = nil
             }
         }
+
+        evaluateTurboTuning(
+            id: id,
+            aggregateBytes: aggregateBytes,
+            now: now
+        )
     }
 
     private func fail(id: UUID, message: String, notify: Bool) {
