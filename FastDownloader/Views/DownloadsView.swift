@@ -48,7 +48,11 @@ private struct DownloadRow: View {
                         if item.transferMode == .turbo,
                            let count = item.segments?.count {
                             Text("•")
-                            Text("Turbo ×\(count)")
+                            if let limit = item.turboConcurrencyLimit {
+                                Text("Turbo ×\(count) • ≤\(limit) active")
+                            } else {
+                                Text("Turbo ×\(count)")
+                            }
                         }
 
                         if let host = sourceHost {
@@ -66,6 +70,16 @@ private struct DownloadRow: View {
             }
 
             progressSection
+
+            if let limitedUntil = item.rateLimitedUntil,
+               limitedUntil > Date() {
+                Label(
+                    "Server rate limit — automatic retry scheduled",
+                    systemImage: "hourglass.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
 
             if let fallback = item.turboFallbackReason,
                item.transferMode == .single {
