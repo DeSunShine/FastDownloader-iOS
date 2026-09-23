@@ -19,8 +19,8 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    LabeledContent("Connections per Host") {
-                        Text("Up to 6")
+                    LabeledContent("Transfer Mode") {
+                        Text("Background single-stream")
                             .foregroundStyle(.secondary)
                     }
                 }
