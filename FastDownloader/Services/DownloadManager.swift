@@ -1248,7 +1248,10 @@ final class DownloadManager: NSObject, ObservableObject {
         if tuning.bestSpeed <= 0 {
             tuning.bestSpeed = measuredSpeed
             tuning.bestConcurrency = current
-        } else if measuredSpeed >= tuning.bestSpeed * TurboPolicy.tuningImprovementThreshold {
+        } else if TurboPolicy.higherConcurrencyIsWorthIt(
+            measuredSpeed: measuredSpeed,
+            bestSpeed: tuning.bestSpeed
+        ) {
             tuning.bestSpeed = measuredSpeed
             tuning.bestConcurrency = current
         } else {
