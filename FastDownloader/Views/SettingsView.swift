@@ -12,6 +12,7 @@ struct SettingsView: View {
                 }
 
                 Section("Downloads") {
+                    Toggle("Turbo Engine", isOn: $settings.turboEnabled)
                     Toggle("Download Notifications", isOn: $settings.downloadNotifications)
                     Toggle("Calculate SHA-256 After Download", isOn: $settings.verifyDownloads)
 
@@ -21,7 +22,7 @@ struct SettingsView: View {
                     }
 
                     LabeledContent("Transfer Mode") {
-                        Text("Background single-stream")
+                        Text(settings.turboEnabled ? "Adaptive 1 / 2 / 4 / 8" : "Single stream")
                             .foregroundStyle(.secondary)
                     }
                 }
