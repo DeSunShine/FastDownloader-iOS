@@ -170,6 +170,29 @@ final class FastDownloaderTests: XCTestCase {
         XCTAssertEqual(TurboPolicy.networkRetryDelay(attempt: 5), 16)
     }
 
+    func testAutoTurboThroughputDecision() {
+        XCTAssertTrue(
+            TurboPolicy.higherConcurrencyIsWorthIt(
+                measuredSpeed: 1_100_000,
+                bestSpeed: 1_000_000
+            )
+        )
+        XCTAssertFalse(
+            TurboPolicy.higherConcurrencyIsWorthIt(
+                measuredSpeed: 1_050_000,
+                bestSpeed: 1_000_000
+            )
+        )
+        XCTAssertTrue(
+            TurboPolicy.higherConcurrencyIsWorthIt(
+                measuredSpeed: 900_000,
+                bestSpeed: 0
+            )
+        )
+        XCTAssertEqual(TurboPolicy.tuningWindow, 1.5, accuracy: 0.001)
+        XCTAssertEqual(TurboPolicy.tuningMinimumBytes, 256 * 1024)
+    }
+
     func testURLResolutionAddsHTTPS() {
         XCTAssertEqual(
             BrowserStore.resolvedURL(from: "example.com")?.absoluteString,
@@ -246,8 +269,8 @@ final class FastDownloaderTests: XCTestCase {
         XCTAssertEqual(DurationFormatter.remaining(3_660), "1h 1m left")
     }
 
-    func testAppVersionIs042() {
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.4.2")
-        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "13")
+    func testAppVersionIs043() {
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, "0.4.3")
+        XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String, "14")
     }
 }
