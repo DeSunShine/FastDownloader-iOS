@@ -1746,25 +1746,66 @@ extension DownloadManager: URLSessionDownloadDelegate, URLSessionTaskDelegate {
                 }
             }
 
+            guard let segmentsSnapshot = items[itemIndex].segments,
+                  let segment = segmentsSnapshot.first(where: { $0.index == segmentIndex })
+            else { return }
+
+            let attempt = (segment.retryCount ?? 0) + 1
+
+            if attempt > TurboPolicy.maximumAutomaticRetries {
+                update(identity.itemID) { item in
+                    guard var segments = item.segments,
+                          let position = segments.firstIndex(where: { $0.index == segmentIndex })
+                    else { return }
+
+                    segments[position].taskIdentifier = nil
+                    if let resumeFile {
+                        segments[position].resumeDataFile = resumeFile
+                    }
+                    segments[position].retryCount = attempt
+                    item.segments = segments
+                }
+
+                fail(
+                    id: identity.itemID,
+                    message: "Turbo segment failed repeatedly: " + error.localizedDescription,
+                    notify: true
+                )
+                return
+            }
+
+            let delay = TurboPolicy.networkRetryDelay(attempt: attempt)
+            let retryAt = Date().addingTimeInterval(delay)
+
             update(identity.itemID) { item in
                 guard var segments = item.segments,
                       let position = segments.firstIndex(where: { $0.index == segmentIndex })
                 else { return }
 
                 segments[position].taskIdentifier = nil
+                segments[position].retryCount = attempt
+                segments[position].nextRetryAt = retryAt
+
                 if let resumeFile {
                     segments[position].resumeDataFile = resumeFile
+                } else {
+                    segments[position].resumeDataFile = nil
+                    segments[position].receivedBytes = 0
                 }
+
                 item.segments = segments
-                item.state = .failed
+                item.receivedBytes = segments.reduce(0) {
+                    $0 + ($1.completed ? $1.length : $1.receivedBytes)
+                }
+                item.state = .downloading
                 item.bytesPerSecond = nil
                 item.etaSeconds = nil
-                item.errorMessage = error.localizedDescription
+                item.errorMessage = nil
             }
 
             progressSamples[identity.itemID] = nil
             saveItems()
-            notifyFailed(id: identity.itemID)
+            scheduleTurboLaunch(id: identity.itemID, after: delay)
             return
         }
 
