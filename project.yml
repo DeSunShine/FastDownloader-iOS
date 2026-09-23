@@ -18,8 +18,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.desunshine.fastdownloader
         INFOPLIST_FILE: FastDownloader/Info.plist
-        CURRENT_PROJECT_VERSION: 7
-        MARKETING_VERSION: 0.2.5
+        CURRENT_PROJECT_VERSION: 8
+        MARKETING_VERSION: 0.3.0
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: "NO"
   FastDownloaderTests:
