@@ -18,6 +18,27 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     ) {
         DownloadManager.shared.backgroundCompletionHandler = completionHandler
     }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list, .sound])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if response.notification.request.content.userInfo["destination"] as? String == "downloads" {
+            DispatchQueue.main.async {
+                AppRouter.shared.selectedTab = AppRouter.Tab.downloads.rawValue
+            }
+        }
+        completionHandler()
+    }
 }
 
 @main
