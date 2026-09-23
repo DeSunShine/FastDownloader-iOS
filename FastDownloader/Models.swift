@@ -15,6 +15,35 @@ enum DownloadIntegrityStatus: String, Codable {
     }
 }
 
+enum DownloadTransferMode: String, Codable {
+    case single
+    case turbo
+
+    var title: String {
+        switch self {
+        case .single: return "Single"
+        case .turbo: return "Turbo"
+        }
+    }
+}
+
+struct DownloadSegment: Identifiable, Codable, Equatable {
+    var id: Int { index }
+
+    let index: Int
+    let startByte: Int64
+    let endByte: Int64
+    var receivedBytes: Int64 = 0
+    var completed: Bool = false
+    var partFile: String?
+    var resumeDataFile: String?
+    var taskIdentifier: Int?
+
+    var length: Int64 {
+        endByte - startByte + 1
+    }
+}
+
 enum DownloadState: String, Codable, CaseIterable {
     case queued
     case downloading
@@ -60,6 +89,9 @@ struct DownloadItem: Identifiable, Codable, Equatable {
     var serverAcceptsRanges: Bool?
     var expectedSHA256Base64: String?
     var integrityStatus: DownloadIntegrityStatus?
+    var transferMode: DownloadTransferMode?
+    var segments: [DownloadSegment]?
+    var turboFallbackReason: String?
 
     init(
         id: UUID = UUID(),
@@ -85,7 +117,10 @@ struct DownloadItem: Identifiable, Codable, Equatable {
         responseContentEncoding: String? = nil,
         serverAcceptsRanges: Bool? = nil,
         expectedSHA256Base64: String? = nil,
-        integrityStatus: DownloadIntegrityStatus? = nil
+        integrityStatus: DownloadIntegrityStatus? = nil,
+        transferMode: DownloadTransferMode? = nil,
+        segments: [DownloadSegment]? = nil,
+        turboFallbackReason: String? = nil
     ) {
         self.id = id
         self.sourceURL = sourceURL
@@ -111,6 +146,9 @@ struct DownloadItem: Identifiable, Codable, Equatable {
         self.serverAcceptsRanges = serverAcceptsRanges
         self.expectedSHA256Base64 = expectedSHA256Base64
         self.integrityStatus = integrityStatus
+        self.transferMode = transferMode
+        self.segments = segments
+        self.turboFallbackReason = turboFallbackReason
     }
 
     var progress: Double {
@@ -128,6 +166,7 @@ final class AppSettings: ObservableObject {
         static let verifyDownloads = "settings.verifyDownloads"
         static let openPopupsInTabs = "settings.openPopupsInTabs"
         static let downloadNotifications = "settings.downloadNotifications"
+        static let turboEnabled = "settings.turboEnabled"
     }
 
     @Published var allowCellular: Bool {
@@ -150,6 +189,10 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(downloadNotifications, forKey: Key.downloadNotifications) }
     }
 
+    @Published var turboEnabled: Bool {
+        didSet { UserDefaults.standard.set(turboEnabled, forKey: Key.turboEnabled) }
+    }
+
     private init() {
         let defaults = UserDefaults.standard
         if defaults.object(forKey: Key.allowCellular) == nil {
@@ -167,11 +210,15 @@ final class AppSettings: ObservableObject {
         if defaults.object(forKey: Key.downloadNotifications) == nil {
             defaults.set(true, forKey: Key.downloadNotifications)
         }
+        if defaults.object(forKey: Key.turboEnabled) == nil {
+            defaults.set(true, forKey: Key.turboEnabled)
+        }
 
         allowCellular = defaults.bool(forKey: Key.allowCellular)
         allowConstrained = defaults.bool(forKey: Key.allowConstrained)
         verifyDownloads = defaults.bool(forKey: Key.verifyDownloads)
         openPopupsInTabs = defaults.bool(forKey: Key.openPopupsInTabs)
         downloadNotifications = defaults.bool(forKey: Key.downloadNotifications)
+        turboEnabled = defaults.bool(forKey: Key.turboEnabled)
     }
 }
