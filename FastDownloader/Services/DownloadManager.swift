@@ -245,6 +245,15 @@ final class DownloadManager: NSObject, ObservableObject {
                     )
 
                 case .success(let response):
+                    if response.statusCode == 429 || response.statusCode == 503 {
+                        self.scheduleProbeRetry(
+                            itemID: itemID,
+                            request: request,
+                            response: response
+                        )
+                        return
+                    }
+
                     guard response.statusCode == 206,
                           let range = ContentRangeParser.parse(response.value(forHTTPHeaderField: "Content-Range")),
                           range.start == 0,
@@ -343,6 +352,9 @@ final class DownloadManager: NSObject, ObservableObject {
             $0.responseLastModified = lastModified
             $0.responseContentEncoding = "identity"
             $0.serverAcceptsRanges = true
+            $0.turboConcurrencyLimit = min(TurboPolicy.initialConcurrency, segments.count)
+            $0.turboRateLimitCount = 0
+            $0.rateLimitedUntil = nil
             $0.errorMessage = nil
             $0.state = .downloading
             if let suggestedFilename, !suggestedFilename.isEmpty {
@@ -351,16 +363,7 @@ final class DownloadManager: NSObject, ObservableObject {
         }
 
         saveItems()
-
-        for segment in segments {
-            startSegmentTask(
-                itemID: itemID,
-                segmentIndex: segment.index,
-                baseRequest: request,
-                validator: validator,
-                resumeData: nil
-            )
-        }
+        launchTurboTasksIfNeeded(id: itemID)
     }
 
     private func startSegmentTask(
@@ -399,6 +402,7 @@ final class DownloadManager: NSObject, ObservableObject {
         taskToItem[task.taskIdentifier] = itemID
 
         segments[segmentPosition].taskIdentifier = task.taskIdentifier
+        segments[segmentPosition].nextRetryAt = nil
         update(itemID) {
             $0.segments = segments
             $0.state = .downloading
